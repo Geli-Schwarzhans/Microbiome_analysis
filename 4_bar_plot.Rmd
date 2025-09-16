@@ -1,5 +1,5 @@
 ---
-title: "Bubble plot"
+title: "Bar plot"
 author: "Bela Hausmann (Joint Microbiome Facility)"
 output:
   html_document:
@@ -13,7 +13,7 @@ editor_options:
 
 # remove all the objects from the R session
 ```{r}
-rm(list=ls())#read input file, containing culture data
+rm(list=ls())
 ```
 
 ```{r}
