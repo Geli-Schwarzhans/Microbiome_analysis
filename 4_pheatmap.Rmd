@@ -1,0 +1,63 @@
+---
+title: "pheatmap demo"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(pheatmap)
+```
+
+
+# Load containers
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all.rds"))
+SE$collection_date <- as.character(SE$collection_date) 
+```
+
+```{r}
+taxon <- "Bacteria"
+SE_plot <- SE[rowData(SE)$Domain %in% taxon]
+```
+
+
+# Heatmap
+
+```{r fig.width=12,fig.height=12}
+pheatmap(
+  mat = SE_plot %>%
+    assay("counts"),
+  annotation_row = SE_plot %>%
+    rowData() %>%
+    subset(select = SE_plot %>% taxonomyRanks() %>% rev()) %>%
+    as.data.frame(),
+  annotation_col = SE_plot %>%
+    colData() %>%
+    subset(select = "Species") %>%
+    as.data.frame(),
+  color = viridis::turbo(20),
+  cellwidth = 12,
+  cellheight = 12,
+  main = g("{PROJECT_NAME}: {taxon} subset"),
+  # to show the values in the cells:
+  # display_numbers = TRUE,
+  # number_color = "white"
+  # to export the heatmap:
+   filename = file.path(PLOTS_DIR, g("{PROJECT_NAME}_{taxon}_heatmap.pdf"))
+)
+```

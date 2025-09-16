@@ -1,0 +1,154 @@
+---
+title: "nCOMBC"
+author: "Geli"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(ANCOMBC)
+library(phyloseq)
+library(microbiome)
+library(nloptr)
+library(tibble)
+library(DT)
+```
+
+```{r}
+#PS_abs <- readRDS(file.path(RD_DIR, "PS_abs.rds"))
+#PS_abs
+SE_abs <- readRDS(file.path(RD_DIR, "SE_abs.rds"))
+```
+
+#Subset the data
+```{r}
+# let's remind ourselves which assay we have available to us
+assayNames(SE_abs)
+# make custom order of the Samples
+SE_abs$Species <- factor(SE_abs$Species, levels =c("SC","Ac", "E25","UV7"))
+SE_abs$collection_date <- factor(SE_abs$collection_date, levels =c("0","5", "11","20","35"))
+SE11 <- SE_abs
+SE11$Species <- factor(SE11$Species, levels =c("SC","Ac", "E25","UV7"))
+SEtest <- SE_abs[, SE_abs$collection_date %in% c("11")]
+SEtest <- SEtest[, SEtest$Species %in% c("Ac","UV7")]
+
+SEtest$Species <- factor(SEtest$Species, levels =c("SC","UV7"))
+SEtest$collection_date <- factor(SEtest$collection_date, levels =c("11"))
+
+```
+
+
+# inspect you data 
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+```
+
+
+### ANCOMBC in a loop in SummarizedExperiment ###
+
+### run analysis acc. to https://bioconductor.org/packages/release/bioc/vignettes/ANCOMBC/inst/doc/ANCOMBC2.html #####
+
+```{r}
+set.seed(123)
+# It should be noted that we have set the number of bootstrap samples (B) equal 
+# to 10 in the 'trend_control' function for computational expediency. 
+# However, it is recommended that users utilize the default value of B, 
+# which is 100, or larger values for optimal performance.
+output <- ancombc2(
+  data = SEtest,
+  assay_name = "counts",
+  tax_level = "Family",
+  fix_formula = "Species",
+  rand_formula = NULL,
+  p_adj_method = "holm",
+  pseudo = 1,
+  pseudo_sens = TRUE,
+  prv_cut = 0.10,
+  s0_perc = 0.05,
+  group = "Species",
+  struc_zero = TRUE,
+  neg_lb = TRUE,
+  alpha = 0.05,
+  n_cl = 1,
+  verbose = TRUE,
+  global = TRUE,
+  pairwise = TRUE
+)
+  
+#  dunnet = TRUE,
+#  trend = TRUE,
+#  trend_control = list(
+#    contrast = list(
+#      matrix(c(1, -1, 0), nrow = 1),
+#      matrix(c(1, 0, -1), nrow = 1)
+#      ),
+#    node = list(2)  # Specify the number of groups being compared
+#  )
+#)
+```
+
+# Run analysis manually
+
+```{r}
+SE_abs$Species <- factor(SE_abs$Species, levels =c("SC","Ac", "E25","UV7"))
+SE_abs$collection_date <- factor(SE_abs$collection_date, levels =c("0","5", "11","20","35"))
+
+results <- data.frame()
+ancom_fdr <- data.frame()
+ancom_logfold <- data.frame()
+
+#out <- ancombc(data = SE0ES, assay_name = "counts", formula = "Species", tax_level = "Family", neg_lb = TRUE, struc_zero = FALSE, alpha = 0.05)
+out <- ancombc2(data = SE_abs, assay_name = "counts", fix_formula = "Species + collection_date", rand_formula = "(Species | collection_date)", tax_level = "Family", neg_lb = TRUE, struc_zero = FALSE)
+
+
+# Store the results in the data frames
+    res <- data.frame(
+      rowNames = row.names(out$res$lfc),
+      lfc = unlist(out$res$lfc),
+      se = unlist(out$res$se),
+      W = unlist(out$res$W),
+      p_val = unlist(out$res$p_val),
+      q_val = unlist(out$res$q_val),
+      diff_abn = unlist(out$res$diff_abn)
+    )
+  #res <- data.frame(rowNames ,lfc , se, W,p_val,q_val,diff_abn)
+    # Filter the results based on q-value and log-fold change
+    taxon_names <- grep("^Family:|Class:|Order:|Phylum:", res$lfc, value = TRUE)
+    res$rowNames <- c(taxon_names, taxon_names, taxon_names)
+
+    
+    ancom_fdr_subset <- res %>% dplyr::filter(q_val < 0.05)
+    ancom_logfold_subset <- ancom_fdr_subset %>% dplyr::filter(lfc < -2.0 | lfc > 2.0)
+    
+    # Add information about the subset
+    ancom_fdr_subset$collection_date <- "0"
+    ancom_fdr_subset$Species <- "SC-v-E25"
+    ancom_logfold_subset$collection_date <- "0"
+    ancom_logfold_subset$Species <- "SC-v-E25"
+    
+    # Append the results to the overall data frames
+    results <- rbind(results, res)
+    ancom_fdr <- rbind(ancom_fdr, ancom_fdr_subset)
+    ancom_logfold <- rbind(ancom_logfold, ancom_logfold_subset)
+
+
+# make a df with all taxa and beta (log fold change) data
+T0merge <- merge(Ac_res, res, by = 0, all.x=TRUE, all.y=TRUE)
+merge1 <- data.frame(T0merge$lfc.x, T0merge$lfc.y, rowNames=T0merge$rowNames)
+merge1_A <- merge(merge1, Ac_res, by = 0, all =TRUE)
+merge2 <- data.frame(merge1_A$T0merge, merge1_A$SE_SA_merge.lfc.y, merge1_A$lfc, rowNames=merge1_A$rowNames)
+merge2_WS <- merge(merge2, WS_res, by = 0, all =TRUE)
+merge_all <- data.frame(merge2_WS$merge1_AW.SS_SA_merge.beta.x,merge2_WS$merge1_AW.SS_SA_merge.beta.y,merge2_WS$merge1_AW.beta,merge2_WS$beta, row.names=merge2_WS$Row.names)
+
+```

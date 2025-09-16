@@ -1,0 +1,292 @@
+---
+title: "Yield"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+```
+
+
+# Data
+
+# Load container
+
+```{r}
+SE_raw <- readRDS(file.path(RD_DIR, "SE_raw.rds"))
+```
+
+```{r}
+# This file contains the metadata of all libraries/samples, and not only these with a non-zero yield
+Libraries <- fread(file.path(METADATA_DIR, "Libraries.tsv"))
+Samples <- fread(file.path(METADATA_DIR, "Samples.tsv"))
+Samples$collection_date <- as.character(Samples$collection_date)
+```
+
+```{r}
+# get the total count per sample:
+Yield_SE_raw <-
+  SE_raw %>%
+  scuttle::perCellQCMetrics()
+
+if (interactive()) head(Yield_SE_raw)
+```
+
+
+
+## Pipeline yield
+
+The JMF pipeline provides an overview table of which step retains how much data.
+
+```{r}
+DADA2_libraries <- fread(file.path(DATA_DIR, "DADA2_libraries.tsv"))
+```
+
+We can do a sanity check that the final output from the pipeline is equaly to the yield of your `SE_raw` container.
+
+```{r}
+stopifnot(isTRUE(
+  all.equal(
+    DADA2_libraries[Final_read_pairs > 0, Final_read_pairs],
+    Yield_SE_raw$sum
+  )
+))
+
+stopifnot(isTRUE(
+  all.equal(
+    DADA2_libraries[Final_read_pairs > 0, ASVs],
+    Yield_SE_raw$detected
+  )
+))
+```
+
+Rename columns to be more precise.
+
+```{r}
+setnames(DADA2_libraries, "Final_read_pairs", "Final_raw_read_pairs")
+setnames(DADA2_libraries, "ASVs", "Final_raw_ASVs")
+```
+
+Melt table and then add up yield of libraries for each sample.
+
+```{r}
+Yield <-
+  DADA2_libraries %>%
+  melt("Library_ID", variable.name = "Step", value.name = "Count") %>%
+  subset(Count > 0)
+
+Yield <- merge(
+  Yield,
+  Libraries[, .(Library_ID = JMF_library_ID, JMF_sample_ID)]
+)
+
+Yield <- Yield[, .(Count = sum(Count)), by = .(JMF_sample_ID, Step)]
+```
+
+
+## Yield after filtering
+
+First, we select the containers we want to add to your yield table.
+
+```{r}
+container_files <- list("SE.rds", "SE_deep.rds")
+```
+
+Then we calculate the yield and number of ASVs in each container and add it to the yield table.
+
+```{r}
+add_yield <- function(se, name, ...) {
+  metrics <-
+    se %>%
+    scuttle::perCellQCMetrics(use.altexps = FALSE, ...) %>%
+    as.data.frame() %>%
+    as.data.table(keep.rownames = "SampleID")
+
+  metadata <-
+    se %>%
+    colData() %>%
+    as.data.frame() %>%
+    as.data.table(keep.rownames = "SampleID")
+
+  result <- merge(metrics, metadata)
+
+  Yield <<- rbind( # THE DOUBLE ARROW IS USED HERE!
+    Yield,
+    result[, .(JMF_sample_ID, Step = name %>% str_c("_read_pairs"), Count = sum)],
+    result[, .(JMF_sample_ID, Step = name %>% str_c("_ASVs"), Count = detected)]
+  )
+}
+
+for (container_file in container_files) {
+  cat(crayon::bold(container_file), "\n", sep = "")
+  se <- readRDS(file.path(RD_DIR, container_file))
+
+  add_yield(se, container_file %>% str_remove("\\.rds$"))
+  add_yield(se %>% altExp("top"), container_file %>% str_remove("\\.rds$") %>% str_c("_top"))
+  if ("rarefied" %in% assayNames(se)) {
+    add_yield(se, container_file %>% str_remove("\\.rds$") %>% str_c("Rarefied_", .), assay.type = "rarefied")
+  }
+}
+```
+
+
+## Add metadata
+
+```{r}
+Yield <- merge(Yield, Samples)
+```
+
+
+## Save results
+
+```{r}
+Yield_cast <- Yield %>% dcast(JMF_sample_ID + User_sample_ID ~ Step, value.var = "Count", fill = 0)
+```
+
+```{r}
+write_tsv(Yield_cast, file.path(RESULTS_DIR, "Yield.tsv"))
+```
+
+
+# Plot
+
+## Summarized
+
+```{r}
+ggplot(
+  data = Yield[str_detect(Step, "ASVs", negate = TRUE)],
+  mapping = aes(
+    x = Step,
+    y = Count,
+    colour = Step
+  )
+) +
+  geom_hline(
+    yintercept = 3000,
+    linetype = "dotted"
+  ) +
+  geom_boxplot() +
+  labs(
+    x = NULL
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_yield_summarized.pdf")), width = 6, height = 5, limitsize = FALSE)
+```
+
+
+## Details
+
+```{r}
+ggplot(
+  data = Yield[str_detect(Step, "ASVs", negate = TRUE)],
+  mapping = aes(
+    x = Step,
+    y = Count,
+    colour = Step,
+    shape = str_detect(Step, "SE"),
+    group = JMF_sample_ID
+  )
+) +
+  geom_hline(
+    yintercept = 3000,
+    linetype = "dotted"
+  ) +
+  geom_line(
+    colour = "grey60"
+  ) +
+  geom_point() +
+  facet_wrap(
+    facets = ~ JMF_sample_ID + User_sample_ID
+  ) +
+  scale_y_log10() +
+  expand_limits(
+    y = 1
+  ) +
+  labs(
+    x = NULL
+  ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_yield_details.pdf")), width = 15, height = 10, limitsize = FALSE)
+```
+
+
+## Only final read pairs
+
+### Yield bubbles
+
+This has the extra advantage of giving an overview of the metadata.
+
+```{r}
+ggplot(
+  data = Yield[Step == "SE_read_pairs"],
+  mapping = aes(
+    x = Group %>% str_sub(-1),
+    y = collection_date %>% fct_rev(),
+    size = Count,
+    label = Group
+    # colour and shape can be used to visualize more metadata
+  )
+) +
+  geom_point(
+    shape = 1
+  ) +
+  geom_text(
+    hjust = -1,
+    size = 4
+  ) +
+  facet_grid(
+    facets = ~Species,
+    scales = "free_x"
+  )
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_yield_bubbles.pdf")), width = 7, height = 3, limitsize = FALSE)
+```
+
+### Yield rank
+
+```{r}
+plot_data <- Yield[Step == "SE_read_pairs"][order(Count)]
+plot_data[, JMF_sample_ID := JMF_sample_ID %>% fct_inorder()]
+```
+
+```{r}
+ggplot(
+  data = plot_data,
+  mapping = aes(
+    x = JMF_sample_ID,
+    y = Count,
+    colour = Species
+  )
+) +
+  geom_hline(
+    yintercept = 3000,
+    linetype = "dotted"
+  ) +
+  geom_point(
+    # ) + expand_limits(
+    #  y = 0 # non-log-scale
+    #  y = 1 # log-scale
+  ) +
+  scale_y_log10() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_yield_rank.pdf")), width = 7, height = 4, limitsize = FALSE)
+```

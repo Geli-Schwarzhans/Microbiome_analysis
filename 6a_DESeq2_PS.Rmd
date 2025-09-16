@@ -1,0 +1,238 @@
+---
+title: "DESeq2"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+
+* https://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+* https://www.bioconductor.org/packages/release/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html
+* https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4878611/ <- DESeq2 works with only 3 replicates if log2FC threshold of 0.5 (see Table 2)
+
+Benchmarking:
+
+* https://link.springer.com/article/10.1186/s40168-016-0208-8 »we recommend researchers choose tools for detecting DA that exhibit low false positive rates, that have good retrieval power across effect sizes and case/control proportions, and that are not biased for these parameters at differing levels of (high) sparsity: metagenomeSeq feature model and the basic permutation test both fulfill these criteria for large and small datasets, and edgeR for small datasets.«
+* https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02104-1 <- »our analyses suggested that limma-voom, corncob, and DESeq2 showed the most consistent performance across all datasets«
+* https://www.nature.com/articles/s41467-022-28034-z: »One goal of our work was to validate the recommendations of another recent DA method evaluation paper, which found that limma voom, corncob, and DESeq2 performed best overall of the tools they tested.  Based on our results, we do not recommend these tools as the sole methods used for data analysis, and instead would suggest that researchers use more conservative methods such as ALDEx2 and ANCOM-II.«
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(DESeq2)
+library(ampvis2)
+library(data.table)
+library(tidyverse)
+library(viridis)
+library(ggpubr)
+library(DESeq2)
+library(phyloseq)
+library(ggrepel) 
+```
+
+
+# Load data
+
+```{r}
+#SE <- readRDS(file.path(RD_DIR, "SE_abs.rds")) #%>%
+PS <- readRDS(file.path(RD_DIR, "PS_abs.rds")) #%>%
+```
+```{r}
+# Subsetting on the fly:
+PS_test <- subset_samples(PS, sample_data(PS)$collection_date %in% c("11"))
+
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+
+```
+
+
+
+
+### Fix for NAs in tax_table
+```{r}
+tax <- data.frame(tax_table(PS_test))
+
+tax.clean <- data.frame(row.names = row.names(tax),
+Kingdom = str_replace(tax[,1], "D_0__",""),
+Phylum = str_replace(tax[,2], "D_1__",""),
+Class = str_replace(tax[,3], "D_2__",""),
+Order = str_replace(tax[,4], "D_3__",""),
+Family = str_replace(tax[,5], "D_4__",""),
+Genus = str_replace(tax[,6], "D_5__",""),
+stringsAsFactors = FALSE)
+tax.clean[is.na(tax.clean)] <- ""
+
+for (i in 1:6){ tax.clean[,i] <- as.character(tax.clean[,i])}
+####### Fille holes in the tax table
+tax.clean[is.na(tax.clean)] <- ""
+for (i in 1:nrow(tax.clean)){
+#Fill in missing taxonomy
+
+if (tax.clean[i,2] == ""){
+kingdom <- paste("Kingdom_", tax.clean[i,1], sep = "")
+tax.clean[i, 2:6] <- kingdom
+} else if (tax.clean[i,3] == ""){
+phylum <- paste("Phylum_", tax.clean[i,2], sep = "")
+tax.clean[i, 3:6] <- phylum
+} else if (tax.clean[i,4] == ""){
+class <- paste("Class_", tax.clean[i,3], sep = "")
+tax.clean[i, 4:6] <- class
+} else if (tax.clean[i,5] == ""){
+order <- paste("Order_", tax.clean[i,4], sep = "")
+tax.clean[i, 5:6] <- order
+} else if (tax.clean[i,6] == ""){
+family <- paste("Family_", tax.clean[i,5], sep = "")
+} 
+}
+
+tax_table(PS_test) <- as.matrix(tax.clean)
+```
+
+
+
+# DESeq2
+
+```{r}
+# Filter out ASVs with empty values in the "Family" column
+PS_test_filtered <- subset_taxa(PS_test, Genus != "")
+otu_table(PS_test_filtered) <- otu_table(round(as((otu_table(PS_test_filtered)), "matrix")), taxa_are_rows(PS_test_filtered))
+#otu <- tax_table(PS_test_filtered)
+# Now you can try using tax_glom() with "Family" in the filtered phyloseq object
+#ps <- tax_glom(otu, taxrank="Family")
+
+# find out if NA values are in the otu_table
+anyNA(otu_table(PS_test_filtered))
+# romeove NAs from count matrix otu_table
+otu_table(PS_test_filtered)[is.na(otu_table(PS_test_filtered))] <- 0
+
+subset_PS = subset_samples(PS_test_filtered, Species != "Ac") 
+subset_PS = subset_samples(subset_PS, Species != "E25") 
+
+
+#sample_data <- sample_data(subset_PS) # Extract the sample metadata from the phyloseq object
+#count_matrix <- as.matrix(otu_table(subset_PS)) # Extract the  count data from the phyloseq object
+#dim(count_matrix)  # Should be (number of features, number of samples)
+#nrow(sample_data)   # Should be the same as the number of samples in count_matrix
+#sample_data$Species <- factor(sample_data$Species)
+#count_matrix[is.na(count_matrix)] <- 0
+
+
+########################################################################################################################
+################ make half_PS to avoid errors from infinite values (apparently that should help)########################
+half_PS <- PS_test_filtered
+otu_table(half_PS) <- round(otu_table(half_PS)/2) #round and half
+otu_table(half_PS)[is.na(otu_table(half_PS))] <- 0 # remove NAs
+
+count_matrix <- as.matrix(otu_table(half_PS))
+dim(count_matrix)  # Should be (number of features, number of samples)
+nrow(sample_data)   # Should be the same as the number of samples in count_matrix
+sample_data$Species <- factor(sample_data$Species)
+count_matrix[is.na(count_matrix)] <- 0
+########################################################################################################################
+########################################################################################################################
+
+data = phyloseq_to_deseq2(subset_PS, ~ Species)
+dds <- DESeq(subset_PS, test="Wald", fitType="parametric")
+#dds <- DESeqDataSet(subset_PS, design = ~ Species)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Extract the count data from the phyloseq object
+count_data <- otu_table(PS_test_filtered)
+count_data <- round(count_data/2)
+count_data[is.na(count_data)] <- 0
+# Extract the sample metadata from the phyloseq object
+sample_data <- sample_data(half_PS)
+
+# Convert the count data to a matrix if it's not already in matrix format
+count_matrix <- as.matrix(otu_table(PS))
+count_matrix <- as.matrix(count_matrix)
+
+# Convert the count data matrix to integers
+#count_matrix <- as.matrix(count_matrix)
+count_matrix <- as.integer(count_matrix)
+count_matrix[is.na(count_matrix)] <- 
+
+# Assuming 'Species' column in 'sample_data' needs to be converted to a factor
+sample_data$Species <- factor(sample_data$Species)
+
+count_matrix <- count_matrix + 1
+
+# Create a DESeqDataSet object
+dds <- DESeqDataSetFromMatrix(countData = count_matrix, colData = sample_data, design = ~ Species)
+# Assuming you have fixed the non-integer issue in count_matrix
+# Using rlog() or vst() for count data transformation
+data = phyloseq_to_deseq2(PS_test_filtered, ~ Species)
+dds <- DESeq(data, test="Wald", fitType="parametric")
+# OR
+dds <- DESeqDataSetFromMatrix(countData = vst(count_matrix), colData = sample_data, design = ~ Species)
+
+
+deseq
+```
+
+```{r}
+deseq <- DESeq(deseq)
+deseq
+```
+
+```{r}
+plotDispEsts(deseq)
+```
+
+```{r}
+# Always set alpha paramter here!
+deseq_results <- results(deseq, lfcThreshold = 0.5, alpha = 0.05)
+mcols(deseq_results, use.names = TRUE)
+summary(deseq_results)
+deseq_results
+```
+
+```{r}
+plotMA(deseq_results)
+```
+
+```{r}
+deseq_results_dt <- deseq_results %>% as.data.table("Feature_ID")
+```
+
+```{r}
+deseq_results_dt %>% write_tsv(file.path(RESULTS_DIR, g("DESeq2_results.tsv")))
+```
+
+```{r}
+significant_deseq_results <- deseq_results_dt[padj <= 0.05]
+significant_deseq_results[order(-abs(log2FoldChange))]
+```

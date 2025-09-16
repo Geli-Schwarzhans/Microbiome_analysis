@@ -1,0 +1,155 @@
+---
+title: "Preprocess for absolute abundances"
+author: "Geli"
+output:
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(phyloseq)
+library(microViz)
+library(ggplot2)
+library("phyloseq")
+library("vegan")
+library(Matrix)
+library(dplyr)
+library(ANCOMBC)
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install("ANCOMBC")
+```
+# Load containers
+
+```{r}
+# !!! we are loading SE_deep here, but saving it to the SE variable !!!
+SE <- readRDS(file.path(RD_DIR, "SE_deep_all_finalremovedSamples.rds"))
+
+# Subsetting on the fly:
+#SE0 <- SE[, SE$collection_date %in% c("0")]
+#SE5 <- SE[, SE$collection_date %in% c("5")]
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+#SE20 <- SE[, SE$collection_date %in% c("20")]
+#SE35 <- SE[, SE$collection_date %in% c("35")]
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+#SEtest <- SE[, SE$collection_date %in% c("0", "5", "11", "20","35")]
+#SEtest <- SE[, SE$collection_date %in% c("35")]
+#SEtest <- SEtest[, SEtest$Species %in% c("UV7")]
+
+```
+ 
+# To inspect the metadata using the RStudio UI, we can use such commands:
+
+```{r}
+SE %>% colData() %>% as_tibble() %>% View()
+```
+
+###########  Absolute abundances for Summarized experiment  ###########  
+
+```{r}
+# Normalize the counts
+SE_bad <- t(counts(SE)) / rowSums(t(counts(SE)))
+SE_rel <- t(SE_bad)
+#SE_counts <- assay(SE, "counts")
+#SE_rel <- sweep(SE_rarefied, 2, colSums(SE_rarefied), "/")
+#SE_rel <- sweep(SE_counts, 2, colSums(SE_counts), "/")
+#SE_norm <- counts(SEtest) / rowSums(counts(SEtest))
+SE_norm <- assay(SE, "relabundance") <- SE_rel
+
+
+# Multiply relative abundances with absolute values
+#Count_mat_norm <- SE_norm * colData(SE)$ddPCR_RNA
+Count_mat_norm <- sweep(SE_norm, 2, colData(SE)$ddPCR_RNA, `*`)
+
+# Replace the count matrix in the SummarizedExperiment object
+assay(SE) <- Count_mat_norm
+
+# Calculate relabundance and store it as an assay, this should return absolute values for every ASV
+counts(SE)
+
+
+# Store relative abundance as an assay in the SingleCellExperiment object
+assay(SE, 'relabundance') <- SE_rel
+
+
+SE
+# Save the modified SummarizedExperiment object
+saveRDS(SE, file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+#saveRDS(SEtest, file.path(RD_DIR, "SE_abs.rds"))
+```
+
+###########       Absolute abundances for Phyloseq       #############
+
+```{r}
+
+PS <- makePhyloseqFromTreeSummarizedExperiment(SEtest)
+
+PS
+saveRDS(PS, file.path(RD_DIR, "PS_all.rds"))
+```
+
+```{r}
+# transformation using total sum scaling (Total Sum Scaling (TSS) involves dividing the read counts for each sample by the total number of reads in that sample. This method scales the data to have a total count of 1 for each sample, which can be interpreted as proportions or relative abundances.)
+PS_TSS <- transform_sample_counts (PS, function(x) x/sum(x))
+
+#otu_table(PS_clr)
+```
+
+Extract count table
+```{r}
+Count_matrix <-otu_table(PS_TSS) %>% as.data.frame() %>% as.matrix()
+```
+
+Sanity check: Colsums should add to 1
+```{r}
+ifelse(colSums(Count_matrix)==1, "All good", "Re-check calculations")
+
+```
+
+### Multiply relative with absolute values from the ddPCR column
+```{r}
+#add column in df containing rel abundance * bacterial copies/g soil in that sample
+Count_mat_norm <- otu_table(PS_TSS) * sample_data(PS)$ddPCR_RNA
+Count_mat_norm
+
+
+```
+## Replace Phyloseq otu table
+
+```{r}
+PS_abs <- PS
+
+otu_table(PS_abs) <- otu_table(Count_mat_norm, taxa_are_rows = T)
+```
+
+#If the normalization was done correctly, we should see numbers in a much higher order of magnitude as before:
+
+```{r}
+otu_table(PS_abs) %>% as.matrix() %>% head()
+```
+
+#save new PS with abs numbers
+```{r}
+saveRDS(PS_abs, file.path(RD_DIR, "PS_abs.rds"))
+```
+
+# save new SE with abs numbers
+```{r}
+#SE_abs <- makeTreeSummarizedExperimentFromPhyloseq(PS_abs)
+
+#SE_abs
+#saveRDS(SE_abs, file.path(RD_DIR, "SE_abs.rds"))
+```
+

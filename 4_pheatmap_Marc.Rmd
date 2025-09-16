@@ -1,0 +1,68 @@
+---
+title: "pheatmap demo"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(pheatmap)
+```
+
+
+# Load containers
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all.rds"))
+```
+
+```{r}
+SE_family <- agglomerateByRank(SE, "Family")
+SE_family <- relAbundanceCounts(SE_family)
+# SE_family <- transformCounts(SE_family, method = "clr", pseudocount = 1)
+
+top_families <- getTopTaxa(SE_family, top = 10, method = "mean", abund_values = "counts")
+top_families
+
+SE_plot <- SE_family[rownames(SE_family) %in% c(top_families, "Class:TK10")]
+```
+
+# Heatmap
+
+```{r fig.width=12,fig.height=12}
+pheatmap(
+  mat = SE_plot %>%
+    assay("counts"),
+  annotation_row = SE_plot %>%
+    rowData() %>%
+    subset(select = SE_plot %>% taxonomyRanks() %>% head(4) %>% rev()) %>%
+    as.data.frame(),
+  annotation_col = SE_plot %>%
+    colData() %>%
+    subset(select = "Species") %>%
+    as.data.frame(),
+  color = viridis::turbo(20),
+  cellwidth = 12,
+  cellheight = 12,
+  main = g("{PROJECT_NAME}"),
+  # to show the values in the cells:
+  # display_numbers = TRUE,
+  # number_color = "white"
+  # to export the heatmap:
+  filename = file.path(PLOTS_DIR, g("{PROJECT_NAME}_heatmap_Marc.pdf"))
+)
+```
+
+Alternativ: https://david-barnett.github.io/microViz/articles/web-only/heatmaps.html

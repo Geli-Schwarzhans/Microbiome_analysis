@@ -1,0 +1,475 @@
+---
+title: "pheatmap demo"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#rmove all data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(gplots)
+library(ggh4x)
+library(stringr)
+library(tidyverse)
+library(rstatix)
+library(vegan)
+library(magrittr)
+library(gridExtra)
+```
+
+
+# Load containers
+
+# Load container
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+#SEtest <- SE[, SE$collection_date %in% c("35")]
+SEtest <- SE[, SE$collection_date %in% c("0","5","11","20","35")]
+SEtest <- SE[, SE$Species %in% c("UV7")]
+SEtest <- subset(SEtest, !(Family == "NA" | Family == "uncultured" | Family == "Unknown Family"))
+
+# make custom order of the Samples
+#SEtest$Species <- factor(SEtest$Species, levels =c("SC","Ac", "E25","UV7"))
+
+
+Data <-
+  SEtest %>%
+  meltAssay(assay_name = "counts", add_row_data = TRUE, add_col_data = TRUE) %>%
+  tidyr::unite("Lineage", Domain:ASV_ID, sep = " > ", remove = FALSE) %>%
+  as.data.table()
+```
+
+################## ASV trajectories for single timepoint ASVs (not just ones that occurr in multiple timepoints) #################### 
+
+# subsetting the data
+```{r}
+# Remove rows with NA in the "Family" column
+Data <- na.omit(Data, cols = "Family")
+# Then, replace the empty Genus with "unknown-" followed by the name from Family
+Data[is.na(Genus), Genus := paste0("uncultured-", Family)]
+Data[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+
+#create column ASV-Genus just for the plot legend
+filtered_data <- Data
+filtered_data$ASV_Genus <- paste(Data$ASV_ID, Data$Genus, sep = " - ")
+
+
+# Define the chosen set of families
+chosen_families <- c("Pseudomonadaceae",  "Sphingobacteriaceae", "Chthoniobacteraceae","Reyranellaceae")
+chosen_genera <- c("Mucilaginibacter","Pseudomonas","Chthoniobacter","Reyranella")
+
+#chosen_families <- c("Sphingobacteriaceae",  "Reyranellaceae", "Chthoniobacteraceae","Chitinophagaceae")
+#chosen_genera <- c("Mucilaginibacter","Reyranella","Chthoniobacter","Chitinophaga")
+
+# Filter the rows based on chosen families
+filtered_data <- filtered_data[Genus %in% chosen_genera]
+filtered_families <- filtered_data[Family %in% chosen_families]
+#filtered_families <- filtered_data
+
+# Splitting the data.table by 'Family' column
+```
+
+# Data prep for Dotplots
+```{r}
+summarised_families <- filtered_families %>% # the names of the new data frame and the data frame to be summarised
+  group_by(ASV_ID, collection_date, Genus, Family) %>%   # the grouping variable
+  summarise(counts = mean(counts, na.rm = TRUE),  # calculates the mean of each group
+            sd_value = sd(counts, na.rm = TRUE), # calculates the standard deviation of each group
+            n_value = sum(!is.na(counts)),  # calculates the sample size per group
+            SE_value = sd(counts, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+
+#subsets <- split(summarised_families, by = "Family")
+subsets <- split(summarised_families, summarised_families$Family)
+# Printing each subset and assigning them to separate variables
+for (family_name in names(subsets)) {
+  assign(paste0("subset_", family_name), subsets[[family_name]])
+  print(subsets[[family_name]])
+}
+# Step 3: For each subset, assign and create a summarized 'line_' version
+#for (family_name in names(subsets)) {
+#  # Create the subset variable (optional step if not used later individually)
+#  assign(paste0("subset_", family_name), subsets[[family_name]])
+#  
+#  # Summarize the subset
+#  summarized_df <- subsets[[family_name]] %>%
+#    group_by(collection_date, Genus) %>%
+#    summarise(
+#      counts = mean(counts, na.rm = TRUE),
+#      sd_value = sd(counts, na.rm = TRUE),
+#      n_value = sum(!is.na(counts)),
+#      SE_value = sd(counts, na.rm = TRUE) / sqrt(n())
+#    )
+  
+  # Save summarized data frame as line_FamilyName
+#  assign(paste0("line_", family_name), summarized_df)
+#}
+
+
+my_color = c("Mucilaginibacter" ="#139696",
+               "Reyranella" = "coral",
+               "Chthoniobacter"= "chartreuse3",
+             "Pseudomonas" ="red3")
+my_shapes = c("Mucilaginibacter" =8,
+              "Chthoniobacter"= 7,
+              "Reyranella" = 6, 
+              "Pseudomonas" =9)
+```
+
+
+# create summarized values for genera per timepoint
+```{r}
+line_Sphingobacteriaceae <- subset_Sphingobacteriaceae %>% # the names of the new data frame and the data frame to be summarised
+  group_by(collection_date, Genus) %>%   # the grouping variable
+  summarise(counts = mean(counts, na.rm = TRUE),  # calculates the mean of each group
+            sd_value = sd(counts, na.rm = TRUE), # calculates the standard deviation of each group
+            n_value = sum(!is.na(counts)),  # calculates the sample size per group
+            SE_value = sd(counts, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+
+line_Reyranellaceae <- subset_Reyranellaceae %>% # the names of the new data frame and the data frame to be summarised
+  group_by(collection_date, Genus) %>%   # the grouping variable
+  summarise(counts = mean(counts, na.rm = TRUE),  # calculates the mean of each group
+            sd_value = sd(counts, na.rm = TRUE), # calculates the standard deviation of each group
+            n_value = sum(!is.na(counts)),  # calculates the sample size per group
+            SE_value = sd(counts, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+
+line_Chthoniobacteraceae <- subset_Chthoniobacteraceae %>% # the names of the new data frame and the data frame to be summarised
+  group_by(collection_date, Genus) %>%   # the grouping variable
+  summarise(counts = mean(counts, na.rm = TRUE),  # calculates the mean of each group
+            sd_value = sd(counts, na.rm = TRUE), # calculates the standard deviation of each group
+            n_value = sum(!is.na(counts)),  # calculates the sample size per group
+            SE_value = sd(counts, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+line_Pseudomonadaceae <- subset_Pseudomonadaceae %>% # the names of the new data frame and the data frame to be summarised
+  group_by(collection_date, Genus) %>%   # the grouping variable
+  summarise(counts = mean(counts, na.rm = TRUE),  # calculates the mean of each group
+            sd_value = sd(counts, na.rm = TRUE), # calculates the standard deviation of each group
+            n_value = sum(!is.na(counts)),  # calculates the sample size per group
+            SE_value = sd(counts, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+```
+
+
+# Dotplots
+```{r}
+# Calculate the minimum value of "counts" across all subsets
+plots <- lapply(names(subsets), function(family_name) {
+  ggplot(subsets[[family_name]], aes(x = collection_date, y = counts, color = Genus)) +
+    #geom_point(size = 2) +
+    geom_violin(aes(x = collection_date, y = counts, group = interaction(collection_date, Genus)))+
+        geom_point(aes(shape = Genus), size = 1, position = position_dodge(width = 3)) +
+    scale_shape_manual(values = my_shapes)+#c(8,21,11,15,10,1,25,5,0,7,3))+
+        scale_color_manual(values = my_color)+
+    geom_line(data = switch(family_name,
+                            "Sphingobacteriaceae" = line_Sphingobacteriaceae,
+                            "Reyranellaceae" = line_Reyranellaceae,
+                            "Chthoniobacteraceae" = line_Chthoniobacteraceae,
+                            "Pseudomonadaceae" = line_Pseudomonadaceae),
+              aes(y = counts, color = Genus, group = Genus), size=1.5) +
+    scale_y_continuous(trans='log2',breaks = c(0, 100000, 1000000, 10000000, 100000000, 1000000000, 10000000000, 100000000000))+
+    #scale_y_continuous(trans='log2', breaks = my_breaks)+#c(10000000, 100000000, 1000000000, 10000000000, 100000000000))+
+    scale_x_continuous(breaks = c(0, 5, 11, 20, 35)) +
+    labs(title = paste(family_name)) +
+    ylab("total ASV abundance") +
+    xlab("Timepoint") +
+    theme_minimal() +
+    theme(axis.text=element_text(size=14))+
+    theme(legend.title = element_blank(), legend.position = "bottom")+  # move the legend to the bottom
+    theme(axis.title.x = element_blank())+
+    theme(legend.title = element_blank(), legend.position = "none")+  # remove the legend
+    #guides(color = guide_legend(override.aes = list(shape = NA))) +  # to remove shapes from the legend
+    guides(color = guide_legend(ncol = 2), shape = guide_legend(ncol = 2))  # set the number of columns in the legend
+  })
+
+
+# for plotting all groups
+#plots <- lapply(names(subsets), function(family_name) {
+#  line_df <- get(paste0("line_", family_name))  # dynamically retrieve the line_ data frame
+#  
+#  ggplot(subsets[[family_name]], aes(x = collection_date, y = counts, color = Genus)) +
+#    geom_violin(aes(group = interaction(collection_date, Genus))) +
+#    geom_point(aes(shape = Genus), size = 1, position = position_dodge(width = 3)) +
+#    #scale_shape_manual(values = my_shapes) +
+#    #scale_color_manual(values = my_color) +
+#   geom_line(data = line_df,
+#              aes(y = counts, color = Genus, group = Genus),
+#              size = 1.5) +
+#    scale_y_continuous(trans = 'log2',
+#                       breaks = c(0, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11)) +
+#    scale_x_continuous(breaks = c(0, 5, 11, 20, 35)) +
+#    labs(title = family_name,
+#         y = "total ASV abundance",
+#         x = "Timepoint") +
+#    theme_minimal() +
+#    theme(axis.text = element_text(size = 14),
+#          axis.title.x = element_blank(),
+#          axis.title.y = element_blank(),
+#          legend.title = element_blank(),
+#          legend.position = "none") +
+#    guides(color = guide_legend(ncol = 2),
+#           shape = guide_legend(ncol = 2))
+#})"
+
+
+# Combine the plots into a single facet grid
+facet_grid <- do.call(gridExtra::grid.arrange, c(plots, ncol = 4))
+
+# Define the order of the subsets
+actual_order <- c("subset_Chthoniobacteraceae", "subset_Pseudomonadaceae", "subset_Reyranellaceae","subset_Sphingobacteriaceae")
+subset_order <- c("subset_Pseudomonadaceae","subset_Sphingobacteriaceae","subset_Chthoniobacteraceae", "subset_Reyranellaceae")
+
+# Assign names to the plots based on subset_order
+named_plots <- setNames(plots, actual_order)
+# Reorder the plots based on the defined o
+custom_ordered_plots <- named_plots[subset_order]
+
+# Combine the plots into a single facet grid
+facet_grid <- do.call(gridExtra::grid.arrange, c(custom_ordered_plots, ncol = 4))
+
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Ac_Pseudo_Reyra_Chthonio_Muci-ASV_Abundance.svg")),  #sphingo_Reyra_Chthonio_Muci.svg")),
+  plot = facet_grid,
+  width = 32,
+  height = 9,
+  units = "cm",
+  dpi = 600
+)
+```
+
+
+######################################## BARPLOTS ################################################################
+#  Dataprep for barplots
+```{r}
+summarised_families <- filtered_families %>% # the names of the new data frame and the data frame to be summarised
+  group_by(collection_date, Genus, Species) %>%   # the grouping variable
+  summarise(counts = mean(counts, na.rm = TRUE),  # calculates the mean of each group
+            sd_value = sd(counts, na.rm = TRUE), # calculates the standard deviation of each group
+            n_value = sum(!is.na(counts)),  # calculates the sample size per group
+            SE_value = sd(counts, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+
+merged_results <- data.table::data.table(
+  collection_date = summarised_families$collection_date,
+  Genus = summarised_families$Genus,
+  abundance = summarised_families$counts,
+  Species = summarised_families$Species
+)
+
+merged_results_day0 <- subset(merged_results, collection_date == "0")
+merged_results_day0 <- subset(merged_results_day0, !(Genus == "NA" | Genus == "uncultured" | Genus == "Unknown"))
+
+merged_results_day5 <- subset(merged_results, collection_date == "5")
+merged_results_day5 <- subset(merged_results_day5, !(Genus == "NA" | Genus == "uncultured" | Genus == "Unknown"))
+
+merged_results_day11 <- subset(merged_results, collection_date == "11")
+merged_results_day11 <- subset(merged_results_day11, !(Genus == "NA" | Genus == "uncultured" | Genus == "Unknown"))
+
+merged_results_day20 <- subset(merged_results, collection_date == "20")
+merged_results_day20 <- subset(merged_results_day20, !(Genus == "NA" | Genus == "uncultured" | Genus == "Unknown"))
+
+merged_results_day35 <- subset(merged_results, collection_date == "35")
+merged_results_day35 <- subset(merged_results_day35, !(Genus == "NA" | Genus == "uncultured" | Genus == "Unknown"))
+
+#chosen_genera <- c("Mucilaginibacter","Chitinophaga","Edaphobaculum","Chthoniobacter","Granulicella","Edaphobacter","Curtobacterium","Burkholderia")
+#chosen_genera <- c("Mucilaginibacter","Chitinophaga","Edaphobaculum","Chthoniobacter")
+chosen_genera <- c("Mucilaginibacter","Edaphobaculum","Chthoniobacter","Sphingomonas")
+
+
+filtered_data0 <- merged_results_day0[Genus %in% chosen_genera]
+filtered_data5 <- merged_results_day5[Genus %in% chosen_genera]
+filtered_data11 <- merged_results_day11[Genus %in% chosen_genera]
+filtered_data20 <- merged_results_day20[Genus %in% chosen_genera]
+filtered_data35 <- merged_results_day35[Genus %in% chosen_genera]
+
+# reorder the Genera to fit the other plots
+desired_order <- c("Sphingomonas","Mucilaginibacter", "Chthoniobacter", "Edaphobaculum")
+filtered_data0$Genus <- factor(filtered_data0$Genus, levels = desired_order)
+filtered_data5$Genus <- factor(filtered_data5$Genus, levels = desired_order)
+filtered_data11$Genus <- factor(filtered_data11$Genus, levels = desired_order)
+filtered_data20$Genus <- factor(filtered_data20$Genus, levels = desired_order)
+filtered_data35$Genus <- factor(filtered_data35$Genus, levels = desired_order)
+
+my_color = c("Mucilaginibacter" ="#139696",
+               "Chitinophaga" = "#685582",
+             "Sphingomonas" ="darkviolet",
+               "Chthoniobacter"= "steelblue1",
+               "Edaphobaculum" ="#685582",
+             "Reyranella"="grey30",
+             "Jatrophihabitans"="grey30",
+             "Kaistia"="grey30",
+             "Granulicella"="grey30",
+             "Edaphobacter"="grey30",
+             "Curtobacterium"="grey30",
+             "Burkholderia"="grey30")
+
+```
+
+
+# create the barplot for all timepoints
+```{r}
+barplot_all0 <- 
+  ggplot(
+  data = filtered_data0,
+  mapping = aes(
+    x = Species,
+    y = abundance,
+    fill = Genus
+  )
+) +
+  scale_fill_manual(values= my_color)+
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Genus)+
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  #coord_flip() +
+  scale_y_continuous(breaks = c(100000000, 500000000, 1000000000,2000000000, 3000000000, 4000000000))+
+  ylab("T0") +
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 8),
+   axis.title = element_text(),
+   axis.title.x = element_blank(),
+   axis.text.y = element_text(size = 8), 
+    #axis.title.y = element_text(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )
+
+barplot_all5 <- 
+  ggplot(
+  data = filtered_data5,
+  mapping = aes(
+    x = Species,
+    y = abundance,
+    fill = Genus
+  )
+) +
+  scale_fill_manual(values= my_color)+
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Genus)+
+   ylab("T5") +
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  #coord_flip() +
+  scale_y_continuous(breaks = c(100000000, 500000000, 1000000000,2000000000, 3000000000, 4000000000))+
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 8),
+   axis.title = element_text(),
+   axis.title.x = element_blank(),
+   axis.text.y = element_text(size = 8), 
+    #axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )
+
+barplot_all11 <- 
+  ggplot(
+  data = filtered_data11,
+  mapping = aes(
+    x = Species,
+    y = abundance,
+    fill = Genus
+  )
+) +
+  scale_fill_manual(values= my_color)+
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Genus)+
+   ylab("T11") +
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  #coord_flip() +
+  scale_y_continuous(breaks = c(100000000, 500000000, 1000000000,2000000000, 3000000000, 4000000000))+
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 8),
+   axis.title = element_text(),
+   axis.title.x = element_blank(),
+   axis.text.y = element_text(size = 8), 
+    #axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )
+
+barplot_all20 <- 
+  ggplot(
+  data = filtered_data20,
+  mapping = aes(
+    x = Species,
+    y = abundance,
+    fill = Genus
+  )
+) +
+  scale_fill_manual(values= my_color)+
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Genus)+
+   ylab("T20") +
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  #coord_flip() +
+  scale_y_continuous(breaks = c(100000000, 500000000, 1000000000,2000000000, 3000000000, 4000000000))+
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 8),
+   axis.title = element_text(),
+   axis.title.x = element_blank(),
+   axis.text.y = element_text(size = 8), 
+    #axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )
+
+barplot_all35 <- 
+  ggplot(
+  data = filtered_data35,
+  mapping = aes(
+    x = Species,
+    y = abundance,
+    fill = Genus
+  )
+) +
+  scale_fill_manual(values= my_color)+
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Genus)+
+   ylab("T35") +
+  #scale_y_continuous(trans='log2')+
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  #coord_flip() +
+  scale_y_continuous(breaks = c(100000000, 500000000, 1000000000,2000000000, 3000000000, 4000000000))+
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 8),
+   axis.title = element_text(),
+   axis.text.y = element_text(size = 8), 
+   axis.title.x = element_blank(),
+    #axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )
+
+#facet_grid <- do.call(gridExtra::grid.arrange, c(barplot_all0, barplot_all5, barplot_all11, barplot_all20, barplot_all35, ncol = 1))
+facet_grid <- grid.arrange(grobs =list(barplot_all0, barplot_all5, barplot_all11, barplot_all20, barplot_all35), ncol = 1)
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Abundances_Bar_Chthonio_Edapho_Mucil_sphingo.png")),
+  plot = facet_grid,
+  width = 11,
+  height = 18,
+  units = "cm",
+  dpi = 600
+)
+```
+
+
+
+```{r}
+
+```
+
+

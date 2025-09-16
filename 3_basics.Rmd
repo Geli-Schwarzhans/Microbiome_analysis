@@ -1,0 +1,405 @@
+---
+title: "Basics"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+```
+
+
+# Load container
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_deep_all_finalremovedSamples.rds"))
+```
+
+
+# Access data in container
+
+Remember:
+
+* Rows are always features, i.e., ASVs, OTUs, genera, etc.
+* Columns are always samples (or libraries, or merged samples).
+
+```{r}
+SE
+```
+
+To inspect the metadata using the RStudio UI, we can use such commands:
+
+```{r}
+SE %>% rowData() %>% as_tibble() %>% View()
+```
+
+
+```{r}
+summary(SE)
+```
+
+```{r}
+# number of features:
+nrow(SE)
+```
+
+```{r}
+# number of samples:
+ncol(SE)
+```
+
+```{r}
+# internal feature IDs
+rownames(SE)
+```
+
+```{r}
+# internal sample IDs
+colnames(SE)
+```
+
+
+## assays
+
+Assays are the counts or other abundance data.
+
+```{r}
+# list the assays in container
+assayNames(SE)
+```
+
+```{r}
+count_matrix <- SE %>% assay() # with no parameter, the first assay is returned, which should always be "counts"
+count_matrix <- SE %>% assay("counts") # same thing as above
+head(count_matrix, c(10, 4))
+```
+
+```{r}
+# for functions which need a vegan-style matrix, you can just transpose the matrix
+count_matrix_vegan <- count_matrix %>% t()
+head(count_matrix_vegan, c(10, 4))
+```
+
+```{r}
+# relative abundance as a value from 0 to 1, NOT in percentage
+ra_matrix <- SE %>% assay("relabundance")
+head(ra_matrix, c(10, 4))
+max(ra_matrix)
+
+ra_matrix_percentage <- ra_matrix * 100
+head(ra_matrix_percentage, c(10, 4)) # in %
+max(ra_matrix_percentage) # in %
+```
+
+```{r}
+# centered log ratios
+clr_matrix <- SE %>% assay("clr")
+head(clr_matrix, c(10, 4))
+```
+
+
+## row data
+
+Row data contains all information about the features, so taxonomy.
+
+```{r}
+# list the standardized taxonomic ranks
+SE %>% taxonomyRanks()
+# the standardized taxonomic ranks are:
+mia::TAXONOMY_RANKS
+
+# list all "taxonomic" ranks. rowData() could contain other data about the features that is not taxonomy, this is why taxonomyRanks() filters this out
+SE %>%
+  rowData() %>%
+  names() # the difference is "ASV_ID"
+```
+
+```{r}
+# rowData returns a Bioconductor-DataFrame, which you may want to convert to something more practical:
+
+taxonomy <- SE %>%
+  rowData() %>%
+  as.data.frame() %>%
+  as.data.table(keep.rownames = "FeatureID")
+head(taxonomy)
+
+taxonomy <- SE %>%
+  rowData() %>%
+  as.data.frame() %>%
+  rownames_to_column("FeatureID") %>%
+  as_tibble()
+head(taxonomy)
+```
+
+```{r}
+# get the taxa names found in the container
+SE %>%
+  getUniqueTaxa("Domain") %>%
+  sort()
+
+SE %>%
+  getUniqueTaxa("Genus") %>%
+  head()
+SE %>%
+  getUniqueTaxa("Genus") %>%
+  sort() %>%
+  head() # sort also removes the NA
+```
+
+```{r}
+# unique taxa names on all ranks
+SE %>%
+  getTaxonomyLabels() %>%
+  head()
+```
+
+
+## column data
+
+Column data contains all information about the samples.
+
+```{r}
+# list metadata fields
+SE %>%
+  colData() %>%
+  names() %>%
+  cat(sep = "\n")
+```
+
+```{r}
+# colData returns a Bioconductor-DataFrame, which you may want to convert to something more practical:
+
+samples <- SE %>%
+  colData() %>%
+  as.data.frame() %>%
+  as.data.table(keep.rownames = "SampleID")
+head(samples)
+
+samples <- SE %>%
+  colData() %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleID") %>%
+  as_tibble()
+head(samples)
+```
+
+
+## melt data
+
+Melting in this context means to melt the assay, and the merge row and column data.
+
+```{r}
+# this is already a tibble
+molten_se <- SE %>% meltAssay(abund_values = "counts", add_row_data = TRUE, add_col_data = TRUE)
+molten_se
+```
+
+```{r}
+# you can select exactly what you want too:
+SE %>% meltAssay(abund_values = "clr", add_row_data = c("Phylum", "Genus"), add_col_data = c("User_sample_ID", "Group"))
+```
+
+
+## tree
+
+The tree is what separates TreeSummarizedExperiment from SummarizedExperiment.
+For more reading please see https://f1000research.com/articles/9-1246/v2.
+
+```{r}
+tree <-
+  SE %>%
+  rowTree()
+tree
+
+class(tree)
+# see ?ape::phylo
+```
+
+```{r}
+# however, trees are not subset when the container is subset. if you need a subset tree, you can do this:
+identical(tree$tip.label %>% sort(), rownames(SE))
+
+trimmed_tree <-
+  tree %>%
+  ape::keep.tip(rownames(SE))
+trimmed_tree
+
+stopifnot(identical(trimmed_tree$tip.label %>% sort(), rownames(SE)))
+```
+
+```{r}
+# if you need a rooted tree, this is a quick way to get one:
+rooted_tree <-
+  trimmed_tree %>%
+  phytools::midpoint.root()
+
+rooted_tree
+```
+
+```{r}
+# the modified tree can be saved to the container again
+SE <- changeTree(SE, rooted_tree)
+```
+
+
+## reference sequences
+
+```{r}
+referenceSeq(SE)
+referenceSeq(SE) %>% length()
+referenceSeq(SE) %>%
+  names() %>%
+  head()
+referenceSeq(SE) %>%
+  width() %>%
+  head()
+```
+
+
+
+# altExp
+
+Alternative experiments are containers which have the same samples, but different features. This is optimal to store feature subsets or taxonomic agglomerations. Subsetting the main container to less samples, will automatically subset the alternative experiments too! :)
+
+```{r}
+altExpNames(SE)
+```
+
+```{r}
+SE %>% altExp("top")
+SE %>% altExp("Genus")
+
+# can be chained
+SE %>%
+  altExp("Genus") %>%
+  altExp("top") %>%
+  assay("clr") %>%
+  head(c(10, 4))
+```
+
+
+
+# Subsetting
+
+
+```r
+# Subsetting is performed as if it is a data.frame
+SE[ <subset rows> , <subset cols> ]
+```
+
+## subsetting rows
+
+See also https://microbiome.github.io/OMA/datamanipulation.html#subset-by-feature-row-wise. Subsetting on rows **does not** effect altExps.
+
+```{r}
+subset_by_features1 <- SE[rowData(SE)$Phylum == "Crenarchaeota" & !is.na(rowData(SE)$Phylum), ]
+# by using %in% the "!is.na" is not required 
+subset_by_features2 <- SE[rowData(SE)$Phylum %in% "Crenarchaeota", ]
+identical(subset_by_features1, subset_by_features2)
+
+subset_by_features <- SE[rowData(SE)$Phylum %in% c("Crenarchaeota", "Acidobacteriota"), ]
+subset_by_features
+
+# assays are NOT recalculated, so relative abundance is preserved in reference to the total dataset, which is what we want in most cases:
+subset_by_features %>%
+  assay("relabundance") %>%
+  head(c(10, 4))
+
+# does NOT AFFECT altExp !!!
+subset_by_features %>%
+  rownames() %>%
+  head()
+subset_by_features %>%
+  altExp("Genus") %>%
+  rownames() %>%
+  head()
+identical(subset_by_features, SE)
+identical(altExps(subset_by_features), altExps(SE))
+```
+
+## subsetting columns
+
+See also https://microbiome.github.io/OMA/datamanipulation.html#subset-by-sample-column-wise. Subsetting on columns **does** effect altExps.
+
+```{r}
+subset_by_samples <- SE[, colData(SE)$Soil_type == "grassland"]
+# or
+subset_by_samples <- SE[, SE$Soil_type == "grassland"]
+subset_by_samples
+
+# does AFFECT altExp !!! this is why this function is also slow, because it needs to subset all altExp
+subset_by_samples %>%
+  colnames() %>%
+  head()
+subset_by_samples %>%
+  altExp("Genus") %>%
+  colnames() %>%
+  head()
+identical(altExps(subset_by_samples), altExps(SE))
+```
+
+## subsetting by ID
+
+```{r}
+subset_by_id <- SE[c("ASV_1uo_lwx"), c("JMF-1906-4-0001", "JMF-1906-4-0002")]
+subset_by_id %>% assay()
+```
+
+
+
+# Extras
+
+A list of all functions included in mia can be found at https://microbiome.github.io/mia/reference/.
+
+## top taxa
+
+```{r}
+SE %>% getTopTaxa()
+SE %>%
+  altExp("Genus") %>%
+  getTopTaxa()
+```
+
+```{r}
+# the most abundant feature per sample
+SE %>% perSampleDominantTaxa() # see also addPerSampleDominantTaxa() to add this to the colData
+
+# summary of above
+SE %>% countDominantTaxa()
+
+# works on other levels too:
+SE %>% perSampleDominantTaxa(rank = "Genus")
+# or
+SE %>%
+  altExp("Genus") %>%
+  perSampleDominantTaxa()
+```
+
+## prevalence
+
+```{r}
+SE %>%
+  getPrevalence() %>%
+  head()
+SE %>%
+  altExp("top") %>%
+  getPrevalence() %>%
+  head()
+
+# >90% prevalence:
+SE %>% getPrevalentTaxa(prevalence = 90 / 100)
+```

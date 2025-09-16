@@ -1,0 +1,185 @@
+---
+title: "Ordinations using mia"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(scater)
+```
+
+
+# Load containers
+
+```{r}
+# !!! we are loading SE_deep here, but saving it to the SE variable !!!
+SE <- readRDS(file.path(RD_DIR, "SE_deep.rds"))
+
+# Subsetting on the fly:
+#SE0 <- SE[, SE$collection_date %in% c("0")]
+#SE5 <- SE[, SE$collection_date %in% c("5")]
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+#SE20 <- SE[, SE$collection_date %in% c("20")]
+#SE35 <- SE[, SE$collection_date %in% c("35")]
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+#SEf5 <- SE[, SE$collection_date %in% c("5","11", "20","35")]
+#SEtest <- SE[, SE$collection_date %in% c("0", "5","11", "20","35")]
+SEtest <- SE[, SE$collection_date %in% c("35")]
+```
+
+```{r}
+# let's remind ourselves which assay we have available to us
+assayNames(SE)
+# make custom order of the Samples
+SEtest$Species <- factor(SEtest$Species, levels =c("SC","Ac", "E25","UV7"))
+
+```
+
+```{r}
+# mia::calculateUniFrac needs a trimmed and rooted tree
+SEtest <- changeTree(
+  SEtest,
+  SEtest %>%
+    rowTree() %>%
+    ape::keep.tip(rownames(SEtest)) %>%
+    phytools::midpoint.root()
+)
+```
+
+#Check if tree fits data for Unifrac
+```{r}
+# Step 1: Ensure tree and abundance table are from the same dataset
+# Assuming you have a SummarizedExperiment object named 'SE' containing the tree and abundance table
+
+# Check sample names consistency between tree and abundance table
+if (!identical(rownames(rowTree(SEtest)), colnames(counts(SEtest)))) {
+  stop("Sample names in the tree and abundance table are not consistent.")
+}
+
+# Step 2: Verify abundance values for all samples in the tree
+tree_samples <- rownames(rowTree(SEtest))
+abundance_samples <- colnames(counts(SEtest))
+
+missing_samples <- setdiff(tree_samples, abundance_samples)
+if (length(missing_samples) > 0) {
+  stop(paste("Abundance values are missing for the following samples:", paste(missing_samples, collapse = ", ")))
+}
+
+# Step 3: Check data formats and compatibility
+
+# Confirm that the abundance table is compatible with the tree
+if (!is(tree(SEtest), "phylo")) {
+  stop("The tree and abundance table are not compatible.")
+}
+
+# Step 4: Regenerate tree or abundance table if necessary
+# If you suspect any issues with the tree or abundance table, you may need to regenerate them using the appropriate methods or guidelines provided by the 'mia' package.
+
+# Once the compatibility issues are resolved, you can proceed with the 'runMDS' function
+SEtest <- runMDS(SEtest, FUN = mia::calculateUniFrac, name = "PCoA_weighted_UniFrac_rarefied", weighted = TRUE, tree = as(rowTree(SE), "phylo"), exprs_values = "rarefied", ntop = Inf)
+
+```
+
+# Ordinate
+
+```{r}
+# (a MDS and a PCoA are the same thing)
+SEtest <- runMDS(SEtest, FUN = vegan::vegdist, name = "PCoA_BrayCurtis_rarefied", exprs_values = "rarefied", ntop = Inf)
+
+# Unlike the MDS/PCoA, a NMDS is non-parametric
+SEtest <- runNMDS(SEtest, name = "NMDS_BrayCurtis_rarefied", exprs_values = "rarefied", ntop = Inf, ncomponents =20)
+
+# mia provides a function to caluclate UniFrac distances
+SEtest <- runMDS(SEtest, FUN = mia::calculateUniFrac, name = "PCoA_weighted_UniFrac_rarefied", weighted = TRUE, tree = rowTree(SEtest), exprs_values = "rarefied", ntop = Inf)
+
+# Aitchison distance:
+SEtest <- runMDS(SEtest, FUN = vegan::vegdist, name = "PCoA_euclidean_clr", method = "euclidean", exprs_values = "clr", ntop = Inf)
+# identical to
+SEtest <- runPCA(SEtest, name = "PCA_clr", exprs_values = "clr", ntop = Inf, ncomponents = 10)
+
+# t-SNE
+SEtest <- runTSNE(SEtest, name = "tSNE_clr", exprs_values = "clr", ntop = Inf)
+```
+
+This is how we can inspect our ordinations:
+
+```{r}
+# returns a list of all available reduced dimensions in the SEtest object. This provides an overview of the available dimensionality reduction results.
+reducedDims(SEtest)
+
+# retrieves the reduced dimensions calculated using Principal Coordinate Analysis (PCoA) with the Bray-Curtis dissimilarity measure, specifically the "PCoA_BrayCurtis_rarefied" dimension. This function returns the coordinates of samples in the reduced space.
+reducedDim(SEtest, "PCoA_BrayCurtis_rarefied")
+
+# retrieves the reduced dimensions calculated using Non-metric Multidimensional Scaling (NMDS) with the Bray-Curtis dissimilarity measure, specifically the "NMDS_BrayCurtis_rarefied" dimension. Similar to the previous function, it returns the coordinates of samples in the reduced space.
+reducedDim(SEtest, "NMDS_BrayCurtis_rarefied")
+
+# retrieves the stress value associated with the NMDS dimension "NMDS_BrayCurtis_rarefied". Stress is a measure of how well the NMDS solution represents the dissimilarities between samples. Lower stress values indicate a better fit.
+attr(reducedDim(SEtest, "NMDS_BrayCurtis_rarefied"), "Stress")
+
+# is a slightly different syntax using the pipe operator (%>%). It calculates the stress value directly without explicitly mentioning the reducedDim function. It retrieves the stress value associated with the NMDS dimension "NMDS_BrayCurtis_rarefied" in a chained manner.
+SEtest %>% reducedDim("NMDS_BrayCurtis_rarefied") %>% attr("Stress")
+```
+
+Plot them:
+
+```{r}
+set.seed(42)
+plotReducedDim(SEtest, "PCoA_BrayCurtis_rarefied", colour_by = "Species", shape_by = "collection_date", text_by = "User_sample_ID", text_size = 3)+
+  scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3")) 
+
+set.seed(42)
+plotReducedDim(SEtest, "NMDS_BrayCurtis_rarefied", colour_by = "Species", shape_by = "collection_date", text_by = "User_sample_ID", text_size = 3, size_by = "ddPCR_RNA") + 
+  scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3")) +
+  labs(subtitle = str_c("Stress: ", SEtest %>% reducedDim("NMDS_BrayCurtis_rarefied") %>% attr("Stress") %>% round(2)))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rel_NMDS_T35.png")), width = 8, height = 8, limitsize = FALSE)
+
+
+set.seed(42)
+plotReducedDim(SEtest, "PCoA_weighted_UniFrac_rarefied", colour_by = "Species", shape_by = "collection_date", text_by = "User_sample_ID", text_size = 3)+
+  scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3")) 
+
+set.seed(42)
+plotReducedDim(SEtest, "PCoA_euclidean_clr", colour_by = "Species", shape_by = "collection_date", text_by = "User_sample_ID", text_size = 3)+
+  scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3")) 
+
+set.seed(42)
+plotReducedDim(SEtest, "PCA_clr", colour_by = "Species", shape_by = "collection_date", text_by = "User_sample_ID", text_size = 3)+
+  scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3")) 
+
+set.seed(42)
+plotReducedDim(SEtest, "tSNE_clr", colour_by = "Species", shape_by = "collection_date", text_by = "User_sample_ID", text_size = 3)+
+  scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3")) 
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rel_tSNE_T35.png")), width = 8, height = 8, limitsize = FALSE)
+
+```
+
+
+# on Genus level
+
+```{r}
+# Calculate on the fly:
+# altExp(SE, "Genus") <- agglomerateByRank(SE, "Genus")
+# altExp(SE, "Genus") <- transformCounts(altExp(SE, "Genus"), method = "clr", pseudocount = 1)
+
+altExp(SEtest, "Genus") <- runMDS(altExp(SEtest, "Genus"), FUN = vegan::vegdist, name = "PCoA_BrayCurtis_rarefied", method = "euclidean", exprs_values = "clr", ntop = Inf)
+
+set.seed(42)
+plotReducedDim(altExp(SEtest, "Genus"), "PCoA_BrayCurtis_rarefied", colour_by = "Species", shape_by = "Species", text_by = "User_sample_ID", text_size = 3)
+```
+

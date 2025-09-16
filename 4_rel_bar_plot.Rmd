@@ -1,0 +1,676 @@
+---
+title: "Bubble plot"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(RColorBrewer)
+library(gridExtra)
+library(tidyverse)
+```
+
+
+# Load container
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+#SE <- transformCounts(SE, method = "relabundance")
+#SE_rel <- counts(SE) / rowSums(counts(SE))
+SE_clr <- assay(SE, "clr")
+SE_rel <- assay(SE, "relabundance")
+
+
+SEtest <- SE[, SE$collection_date %in% c("0","5","11","20","35")]
+#SEtest <- SE[, SE$collection_date %in% c("35")]
+
+#SEtest <- SE[, SE$Species %in% c("UV7")]
+
+```
+
+#process data
+```{r}
+# Remove rows with Family values "NA" or "uncultured"
+SEtest <- subset(SEtest, !(Family == "NA" | Family == "uncultured" | Family == "Unknown Family"))
+# Get the 'Family' column from the rowData of 'SE'
+family_column <- rowData(SEtest)$Family
+domain_column <- rowData(SEtest)$Domain
+# Extract unique names listed under 'Family'
+unique_family_names <- unique(family_column)
+
+# Print the unique family names
+print(unique_family_names)
+```
+
+```{r}
+# make custom order of the Samples
+SEtest$Species <- factor(SEtest$Species, levels =c("SC","Ac", "E25","UV7"))
+
+```
+
+
+```{r}
+#SEtest %>% colData() %>% as_tibble() %>% View()
+```
+
+# Prepare data
+
+```{r}
+Data <-
+  SEtest %>%
+  meltAssay(assay_name = "relabundance", add_row_data = TRUE, add_col_data = TRUE) %>%
+  tidyr::unite("Lineage", Domain:ASV_ID, sep = " > ", remove = FALSE) %>%
+  as.data.table()
+
+#Data <- Data[relabundance > 0] # zeros are optional in bubble plots
+Data <- Data[, relabundance := relabundance * 100] # convert to %
+Data[, Lineage := Lineage %>% str_replace("( (NA|uncultured) >)+", " … >")]
+
+# Select taxa for plot
+
+selected_taxa <- getTopTaxa(SEtest, top = 100, method = "median", assay_name = "relabundance")
+#selected_taxa <- getTopTaxa(SEtest, top = 999, method = "median", assay_name = "counts")
+```
+
+
+# Prepare data at family level
+```{r}
+# Aggregate ASVs by Family
+library(dplyr)
+# Aggregate ASVs by Family and sum up their counts
+family_counts <- Data %>% 
+  group_by(Family) %>% 
+  summarize(Total_Count = sum(relabundance))
+  #summarize(Total_Count = sum(counts))
+# Get the top 10 families based on Total_Count
+top_families <- family_counts %>%
+  top_n(100, Total_Count) %>%
+  pull(Family)
+
+```
+
+# Plot taxa
+
+```{r}
+plot_data <- Data[FeatureID %in% selected_taxa]
+plot_data$Lineage %>%
+  unique() %>%
+  sort() %>%
+  cat(sep = "\n")
+# Filter plot_data to include only the top 10 families
+plot_data_top10 <- plot_data[plot_data$Family %in% top_families, ]
+```
+
+#simple stacked Bar plot
+
+```{r}
+my_color = c("Acidobacteriaceae (Subgroup 1)" ="steelblue3", Actinospicaceae="pink", Alcaligenaceae ="red2", Catenulisporaceae = "orange2",Caulobacteraceae = "firebrick3",Devosiaceae = "#8dd3c7", Inquilinaceae="#aafae7", Micropepsaceae="chartreuse3", Micrcoccaceae="chartreuse", Microbacteriaceae="aquamarine4", Rhodanobacteraceae="chocolate3", Sphingobacteriaceae="#139696", Sphingomonadaceae = "darkviolet", Xanthobacteraceae = "#fb8072", Oxalobacteraceae="hotpink", Micrococcaceae="mediumslateblue", Streptomycetaceae="yellow2", Beijerinckiaceae="#90709a", Gemmatimonadaceae="#dbdfa2",Reyranellaceae = "coral", Acetobacteraceae = "#f5daa3",Paenibacillaceae = "#ccebc5" ,Micromonosporaceae = "brown1", Pseudomonadaceae = "red3", Chthoniobacteraceae= "chartreuse3", Solirubrobacteraceae= "#f2f2f2", Mycobacteriaceae= "brown", Rhizobiaceae = "lightblue1", Burkholderiaceae = "aquamarine", Chitinophagaceae = "#685582", Nocardioidaceae = "#fff397", Nocardiaceae = "steelblue", Pedosphaeraceae= "orange4", Vampirovibrionaceae = "chocolate4", Schlesneriaceae ="thistle", Dongiaceae = "#f2f", Enterobacteriaceae="yellow4", Parachlamydiaceae = "blue")
+
+
+ggplot(Data, aes(x = User_sample_ID, y = relabundance, fill = Family)) +
+  geom_bar(stat = "identity") +
+  #scale_fill_manual(values= c("steelblue3", "orange2","firebrick3","thistle","chartreuse3","aquamarine4","chocolate3","cyan4","brown1","darkviolet","goldenrod1","hotpink","mediumslateblue","yellow","brown2"))+
+  scale_fill_manual(values= my_color)+
+  #scale_fill_brewer(palette= "Paired") +
+  #theme(axis.text.x = element_text(angle = 45, hjust =1)) +
+  theme_light() +
+  theme(axis.text.x  = element_text(angle=0, vjust=0.5, size=10)) +
+  theme(axis.title.x  = element_blank())+
+  #theme(axis.text.y  = element_blank())+
+  #theme(legend.position="none")+
+  xlab("") +
+  ylab("16S rDNA copies/g sediment") +
+  #facet_grid(. ~ collection_date, scales = "free_y", space = "free_y", switch = "y") +
+  facet_wrap(Species~., scales="free_y",nrow=8) +
+   coord_flip() +
+  xlab("") +
+  ylab("abs abundance") 
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_abs_barplot_T5.svg")), width = 6, height = 8, limitsize = FALSE)
+
+```
+
+# add column strategy to data for r or k strategy based on literature
+
+```{r}
+strategy = c("Acidobacteriaceae (Subgroup 1)" ="k", Caulobacteraceae = "r", Devosiaceae = "k", Microbacteriaceae="r", Rhodanobacteraceae="k", Sphingobacteriaceae="r",Sphingomonadaceae = "r",Xanthobacteraceae = "k", Streptomycetaceae="k", Beijerinckiaceae="k", Reyranellaceae = "k", Acetobacteraceae = "r", Rhizobiaceae = "r", Burkholderiaceae = "r", Chitinophagaceae = "r", Pseudomonadaceae ="r", Nocardioidaceae ="k")
+
+# Convert strategy named vector to a data frame
+strategy_df <- data.frame(
+  Family = names(strategy),
+  strategy = unname(strategy),
+  stringsAsFactors = FALSE
+)
+
+# Join the strategy letter to plot_data_top10
+plot_data <- Data %>%
+  left_join(strategy_df, by = "Family")
+
+
+Replicate_counts <- plot_data %>% 
+  group_by(SampleID) %>% 
+  summarize(Total_Count = sum(relabundance))
+#Data<- Data %>%
+ # left_join(strategy_df, by = "Family")
+```
+
+
+# plot strategies
+```{r}
+
+ggplot(plot_data, aes(x = User_sample_ID, y = relabundance, fill = strategy)) +
+  geom_bar(stat = "identity") +
+  #scale_fill_manual(values= c("steelblue3", "orange2","firebrick3","thistle","chartreuse3","aquamarine4","chocolate3","cyan4","brown1","darkviolet","goldenrod1","hotpink","mediumslateblue","yellow","brown2"))+
+  #scale_fill_manual(values= my_color)+
+  #scale_fill_brewer(palette= "Paired") +
+  #theme(axis.text.x = element_text(angle = 45, hjust =1)) +
+  theme_light() +
+  theme(axis.text.x  = element_text(angle=0, vjust=0.5, size=10)) +
+  theme(axis.title.x  = element_blank())+
+  theme(axis.text.y  = element_blank())+
+  #theme(legend.position="none")+
+  xlab("") +
+  ylab("16S rDNA copies/g sediment") +
+  #facet_grid(. ~ collection_date, scales = "free_y", space = "free_y", switch = "y") +
+  facet_wrap(Species~., scales="free_y",nrow=8) +
+   coord_flip() +
+  xlab("") +
+  ylab("abs abundance") 
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_strategy_barplot_T35.png")), width = 6, height = 8, limitsize = FALSE)
+
+```
+
+
+#########################################################################################################################
+############################ Statistical analysis in a loop #############################################################
+#########################################################################################################################
+
+# Create new data.table with count
+```{r}
+strategy_table <- plot_data[, .(collection_date, Replicate, Species, strategy, relabundance)]
+# Assuming your data is called dt
+#condensed_counts <- strategy_table[, .(total_count = sum(counts, na.rm = TRUE)), 
+ #                      by = .(collection_date, Species, strategy, Replicate)]
+condensed_counts <- strategy_table[, .(total_count = relabundance), 
+                       by = .(collection_date, Species, strategy, Replicate)]
+
+counts_summary <- condensed_counts %>% # the names of the new data frame and the data frame to be summarised
+    group_by(Species, collection_date, strategy) %>%   # the grouping variable
+    summarise(mean_value = mean(total_count, na.rm = TRUE),  # calculates the mean of each group
+              sd_value = sd(total_count, na.rm = TRUE), # calculates the standard deviation of each group
+              n_value = sum(!is.na(total_count)),  # calculates the sample size per group
+              SE_value = sd(total_count, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+```
+
+###### test for normality ######
+```{r}
+r_condensed_counts <- condensed_counts[condensed_counts$strategy == "r", c(1,2,3,4,5)]
+k_condensed_counts <- condensed_counts[condensed_counts$strategy == "k", c(1,2,3,4,5)]
+
+SC <- r_condensed_counts[r_condensed_counts$Species == "SC", c(1,2,3,4,5)]
+inputSC <-  SC[SC$collection_date == "35",c(1,2,3,4,5)]
+shapiro.test(inputSC$total_count) #  normal
+
+AC <- r_condensed_counts[r_condensed_counts$Species == "Ac", c(1,2,3,4,5)]
+inputAc <-  AC[AC$collection_date == "5",c(1,2,3,4,5)]
+shapiro.test(inputAc$total_count) #  normal
+
+E25 <- r_condensed_counts[r_condensed_counts$Species == "E25", c(1,2,3,4,5)]
+inputE <-  E25[E25$collection_date == "5",c(1,2,3,4,5)]
+shapiro.test(inputE$total_count) #   normal
+
+UV7 <- r_condensed_counts[r_condensed_counts$Species == "UV7", c(1,2,3,4,5)]
+inputUV7 <-  UV7[UV7$collection_date == "20",c(1,2,3,4,5)]
+shapiro.test(inputUV7$total_count) #  normal
+
+
+ggplot(inputAc, aes(x=total_count)) + 
+  geom_density()
+```
+
+#################### Sort the data by strategy  #################################
+```{r}
+r_condensed_counts <- condensed_counts[condensed_counts$strategy == "r", c(1,2,3,4,5)]
+
+library(dplyr)
+library(rstatix)
+library(tidyr)
+library(purrr)
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_timepoint_nonparam <- function(r_condensed_counts, collection_date) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ Species, data = r_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(r_condensed_counts$total_count, r_condensed_counts$Species, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Sample1 = Var1,
+           Sample2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Timepoint = collection_date,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Timepoint, Sample1, Sample2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_samplediff_nonparam <- r_condensed_counts %>%
+  group_by(collection_date) %>%
+  group_split() %>%
+  map_df(~process_timepoint_nonparam(.x, unique(.x$collection_date)))
+
+write.csv(results_samplediff_nonparam, "R_Stats_wilcox_results_sample_differences_all.csv", row.names = FALSE)
+#############################################################################################################################
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_sample_nonparam <- function(r_condensed_counts, Species) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ collection_date, data = r_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(r_condensed_counts$total_count, r_condensed_counts$collection_date, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Time1 = Var1,
+           Time2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Sample = Species,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Sample, Time1, Time2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_time_nonparam <- r_condensed_counts %>%
+  group_by(Species) %>%
+  group_split() %>%
+  map_df(~process_sample_nonparam(.x, unique(.x$Species)))
+
+
+
+write.csv(results_time_nonparam, "R_wilcox_Stats_results_change_over_time.csv", row.names = FALSE)
+#############################################################################################################################
+
+```
+
+```{r}
+k_condensed_counts <- condensed_counts[condensed_counts$strategy == "k", c(1,2,3,4,5)]
+
+library(dplyr)
+library(rstatix)
+library(tidyr)
+library(purrr)
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_timepoint_nonparam <- function(k_condensed_counts, collection_date) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ Species, data = k_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(k_condensed_counts$total_count, k_condensed_counts$Species, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Sample1 = Var1,
+           Sample2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Timepoint = collection_date,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Timepoint, Sample1, Sample2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_samplediff_nonparam <- k_condensed_counts %>%
+  group_by(collection_date) %>%
+  group_split() %>%
+  map_df(~process_timepoint_nonparam(.x, unique(.x$collection_date)))
+
+write.csv(results_samplediff_nonparam, "K_Stats_wilcox_results_sample_differences_all.csv", row.names = FALSE)
+#############################################################################################################################
+k_condensed_counts$collection_date <- factor(k_condensed_counts$collection_date, levels =c("0","5","11","20","35"))
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_sample_nonparam <- function(k_condensed_counts, Species) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ collection_date, data = k_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(k_condensed_counts$total_count, k_condensed_counts$collection_date, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Time1 = Var1,
+           Time2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Sample = Species,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Sample, Time1, Time2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_time_nonparam <- k_condensed_counts %>%
+  group_by(Species) %>%
+  group_split() %>%
+  map_df(~process_sample_nonparam(.x, unique(.x$Species)))
+
+
+
+write.csv(results_time_nonparam, "K_wilcox_Stats_results_change_over_time.csv", row.names = FALSE)
+#############################################################################################################################
+
+```
+
+##################################
+# parametric (ANOVA + tukey hsd)
+##################################
+
+```{r}
+# Function to process one timepoint
+process_timepoint <- function(k_condensed_counts, collection_date) {
+  # Run ANOVA
+  stat <- aov(total_count ~ Species, data = k_condensed_counts)
+  anova_p <- summary(stat)[[1]][["Pr(>F)"]][1]
+  
+  # Tukey HSD with rstatix
+  tukey <- tukey_hsd(stat)
+  
+  # Add timepoint & ANOVA p-value
+  tukey %>%
+    select(group1, group2, p.adj, p.adj.signif) %>%
+    mutate(Timepoint = collection_date,
+           Anova_pvalue = anova_p) %>%
+    rename(Sample1 = group1,
+           Sample2 = group2,
+           TukeyHSD_pvalue = p.adj,
+           TukeyHSD_sig = p.adj.signif) %>%
+    select(Timepoint, Sample1, Sample2, Anova_pvalue, TukeyHSD_pvalue, TukeyHSD_sig)
+}
+
+# Apply for each timepoint
+results_samplediff <- k_condensed_counts %>%
+  group_by(collection_date) %>%
+  group_split() %>%
+  map_df(~process_timepoint(.x, unique(.x$collection_date)))
+
+write.csv(results_samplediff, "K_Stats_results_sample_differences_all.csv", row.names = FALSE)
+#############################################################################################################################
+
+k_condensed_counts$collection_date <- factor(k_condensed_counts$collection_date, levels =c("0","5","11","20","35"))
+
+process_sample <- function(k_condensed_counts, Species) {
+  # ANOVA across timepoints
+  stat <- aov(total_count ~ collection_date, data = k_condensed_counts)
+  anova_p <- summary(stat)[[1]][["Pr(>F)"]][1]
+  
+  # Tukey HSD
+  tukey <- tukey_hsd(stat)
+  
+  # Build results
+  tukey %>%
+    select(group1, group2, p.adj, p.adj.signif) %>%
+    mutate(Sample = Species,
+           Anova_pvalue = anova_p) %>%
+    rename(Time1 = group1,
+           Time2 = group2,
+           TukeyHSD_pvalue = p.adj,
+           TukeyHSD_sig = p.adj.signif) %>%
+    select(Sample, Time1, Time2, Anova_pvalue, TukeyHSD_pvalue, TukeyHSD_sig)
+}
+
+results_time <- k_condensed_counts %>%
+  group_by(Species) %>%
+  group_split() %>%
+  map_df(~process_sample(.x, unique(.x$Species)))
+
+write.csv(results_time, "K_Stats_results_change_over_time.csv", row.names = FALSE)
+#############################################################################################################################
+```
+
+```{r}
+# Function to process one timepoint
+process_timepoint <- function(r_condensed_counts, collection_date) {
+  # Run ANOVA
+  stat <- aov(total_count ~ Species, data = r_condensed_counts)
+  anova_p <- summary(stat)[[1]][["Pr(>F)"]][1]
+  
+  # Tukey HSD with rstatix
+  tukey <- tukey_hsd(stat)
+  
+  # Add timepoint & ANOVA p-value
+  tukey %>%
+    select(group1, group2, p.adj, p.adj.signif) %>%
+    mutate(Timepoint = collection_date,
+           Anova_pvalue = anova_p) %>%
+    rename(Sample1 = group1,
+           Sample2 = group2,
+           TukeyHSD_pvalue = p.adj,
+           TukeyHSD_sig = p.adj.signif) %>%
+    select(Timepoint, Sample1, Sample2, Anova_pvalue, TukeyHSD_pvalue, TukeyHSD_sig)
+}
+
+# Apply for each timepoint
+results_samplediff <- r_condensed_counts %>%
+  group_by(collection_date) %>%
+  group_split() %>%
+  map_df(~process_timepoint(.x, unique(.x$collection_date)))
+
+write.csv(results_samplediff, "R_Stats_results_sample_differences_all.csv", row.names = FALSE)
+#############################################################################################################################
+
+r_condensed_counts$collection_date <- factor(r_condensed_counts$collection_date, levels =c("0","5","11","20","35"))
+
+process_sample <- function(r_condensed_counts, Species) {
+  # ANOVA across timepoints
+  stat <- aov(total_count ~ collection_date, data = r_condensed_counts)
+  anova_p <- summary(stat)[[1]][["Pr(>F)"]][1]
+  
+  # Tukey HSD
+  tukey <- tukey_hsd(stat)
+  
+  # Build results
+  tukey %>%
+    select(group1, group2, p.adj, p.adj.signif) %>%
+    mutate(Sample = Species,
+           Anova_pvalue = anova_p) %>%
+    rename(Time1 = group1,
+           Time2 = group2,
+           TukeyHSD_pvalue = p.adj,
+           TukeyHSD_sig = p.adj.signif) %>%
+    select(Sample, Time1, Time2, Anova_pvalue, TukeyHSD_pvalue, TukeyHSD_sig)
+}
+
+results_time <- r_condensed_counts %>%
+  group_by(Species) %>%
+  group_split() %>%
+  map_df(~process_sample(.x, unique(.x$Species)))
+
+write.csv(results_time, "R_Stats_results_change_over_time.csv", row.names = FALSE)
+#############################################################################################################################
+```
+
+
+```{r}
+# Define timepoints and sample pairs
+strategies <- c("r", "k")
+# Define the timepoint subsets
+timepoint_subsets <- list(c("0", "5"), c("0", "11"), c("0", "20"), c("0", "35"), c("5", "11"), c("5", "20"), c("5", "35"), c("11", "20"), c("11", "35"), c("20", "35"))
+
+
+# Results table
+results_strat <- data.table(
+  strategy = character(),
+  Species1 = character(),
+  Species2 = character(),
+  Anova_pvalue = numeric(),
+  TukeyHSD_pvalue = numeric())
+
+
+# Loop through timepoints and sample pairs
+for (i in strategies) {
+  for (subset in timepoint_subsets) {
+    
+    # Subset data for this timepoint and species pair
+    subset_data <- condensed_counts[strategy == i & collection_date %in% subset]
+  
+    # Check that the subset contains both samples
+    if (length(unique(subset_data$collection_date)) != 2) next
+    # Perform the ANOVA
+    subset_data$collection_date <- as.factor(subset_data$collection_date) # transform collection_date numbers to factors
+    anova_result <- aov(total_count ~ collection_date, data = subset_data)
+    # Perform Tukey's HSD test
+    tukeyhsd_result <- TukeyHSD(anova_result)
+    # Extract the p-value from the ANOVA and TukeyHSD results
+    anova_pvalue <- summary(anova_result)[[1]][["Pr(>F)"]][1]
+    tukeyhsd_pvalue <- tukeyhsd_result[[1]][, "p adj"][1]
+
+    # Add a row to the results data.table with the summary statistics and significance level
+    if (tukeyhsd_pvalue < 0.0001) {
+      sig <- "****"
+    } else if (tukeyhsd_pvalue < 0.001) {
+      sig <- "***"
+    } else if (tukeyhsd_pvalue < 0.01) {
+      sig <- "**"
+    } else if (tukeyhsd_pvalue < 0.05) {
+      sig <- "*"
+    } else {
+      sig <- "ns"
+    }
+    # Add a row to the results data.table with the summary statistics
+    results_strat <- rbind(results_strat, data.table(strategy = i, Species1 = subset[1], Species2 = subset[2], Anova_pvalue = anova_pvalue, TukeyHSD_pvalue = tukeyhsd_pvalue, TukeyHSD_sig = sig), fill = TRUE)
+  }
+}
+
+# Save results as a CSV file
+write.csv(results_strat, "Strat_TimeStats_UV7.csv", row.names = FALSE)
+```
+
+
+#################### Sort the data by Timepoint #################################
+```{r}
+# Define timepoints and sample pairs
+strategies <- c("r", "k")
+sample_subsets <- list(
+  c("SC", "Ac"),
+  c("SC", "E25"),
+  c("SC", "UV7"),
+  c("Ac", "E25"),
+  c("Ac", "UV7"),
+  c("E25", "UV7")
+)
+
+# Results table
+results_strat <- data.table(
+  strategy = character(),
+  Species1 = character(),
+  Species2 = character(),
+  Anova_pvalue = numeric(),
+  TukeyHSD_pvalue = numeric())
+
+
+# Loop through timepoints and sample pairs
+for (i in strategies) {
+  for (subset in sample_subsets) {
+    
+    # Subset data for this timepoint and species pair
+    subset_data <- condensed_counts[strategy == i & Species %in% subset]
+  
+    # Check that the subset contains both samples
+    if (length(unique(subset_data$Species)) != 2) next
+    # Perform the ANOVA
+    anova_result <- aov(total_count ~ Species, data = subset_data)
+    # Perform Tukey's HSD test
+    tukeyhsd_result <- TukeyHSD(anova_result)
+    # Extract the p-value from the ANOVA and TukeyHSD results
+    anova_pvalue <- summary(anova_result)[[1]][["Pr(>F)"]][1]
+    tukeyhsd_pvalue <- tukeyhsd_result[[1]][, "p adj"][1]
+
+    # Add a row to the results data.table with the summary statistics and significance level
+    if (tukeyhsd_pvalue < 0.0001) {
+      sig <- "****"
+    } else if (tukeyhsd_pvalue < 0.001) {
+      sig <- "***"
+    } else if (tukeyhsd_pvalue < 0.01) {
+      sig <- "**"
+    } else if (tukeyhsd_pvalue < 0.05) {
+      sig <- "*"
+    } else {
+      sig <- "ns"
+    }
+    # Add a row to the results data.table with the summary statistics
+    results_strat <- rbind(results_strat, data.table(strategy = i, Species1 = subset[1], Species2 = subset[2], Anova_pvalue = anova_pvalue, TukeyHSD_pvalue = tukeyhsd_pvalue, TukeyHSD_sig = sig), fill = TRUE)
+  }
+}
+
+# Save results as a CSV file
+write.csv(results_strat, "Strat_samplediff_Stats_T5.csv", row.names = FALSE)
+```
+
+
+

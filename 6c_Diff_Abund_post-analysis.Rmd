@@ -1,0 +1,177 @@
+---
+title: "DESeq2"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(DESeq2)
+```
+
+
+# Load data
+```{r}
+
+SE_abs <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+
+#SE <- SE_abs[, SE_abs$collection_date %in% c("11")]
+#SE <- SE_abs[, SE_abs$Species %in% c("Ac","UV7")]
+```
+
+# Combine two diffAbund results and plot to contrast
+```{r}
+
+# Load the sorted tsv files for the first pair
+file1 <- file.path(DiffAbund_DIR, "SC_UV7_DESeq2_results_in_a_loop.tsv")
+file2 <- file.path(DiffAbund_DIR, "SC_E25_DESeq2_results_in_a_loop.tsv")
+E25 <- fread(file1)
+Ac <- fread(file2)
+
+# Merge the data.tables for each based on Feature_ID
+merged <- rbind(E25, Ac)
+
+```
+
+# write differentially abundant Families and genus names in a file
+```{r}
+
+merged_with_taxonomy <- merge(
+  merged,
+  SE_abs %>% rowData() %>% as.data.table("Feature_ID")
+)
+```
+
+```{r}
+
+# filter out unwanted columns
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2", "Phylum", "Class", "Order", "Family", "Genus")
+filtered <- merged_with_taxonomy[padj <= 0.05]
+filtered <- filtered[, ..columns_to_keep, with = FALSE]
+
+write_tsv(filtered, file.path(DiffAbund_DIR, "SC_E25UV7_DESeq2_merged_filtered.tsv"))
+
+
+```
+
+# Plot
+```{r}
+ggplot(
+  data = filtered,
+  mapping = aes(
+    x = Family,
+    y = log2FoldChange,
+    colour = Species_group2,
+    show_guide = FALSE
+  )
+) +
+  geom_point(
+    aes(alpha = 0.5),
+    size = 5
+  ) +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  #scale_color_manual(values = custom_colors) +  # Apply the custom color palette
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    axis.title.y = element_blank())
+ # theme(legend.position = "none",      # Position the legend at the bottom
+        
+        #axis.title.x = element_blank(),  # Remove x-axis label
+        #axis.text.x = element_blank())   # Remove x-axis tick labels
+        #axis.ticks.x = element_blank())  # Remove x-axis ticks
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq2_SC_v_UV7E25.png")), width = 20, height = 10, limitsize = FALSE)
+
+```
+
+
+# find common Features
+```{r}
+
+# Load the sorted tsv files for the first pair
+positive_file1 <- file.path(DiffAbund_DIR, "SC_E25_DESeq2_positive.tsv")
+negative_file1 <- file.path(DiffAbund_DIR, "SC_E25_DESeq2_negative.tsv")
+sorted_dt_positive1 <- fread(positive_file1)
+sorted_dt_negative1 <- fread(negative_file1)
+
+# Load the sorted tsv files for the second pair
+positive_file2 <- file.path(DiffAbund_DIR, "SC_UV7_DESeq2_positive.tsv")
+negative_file2 <- file.path(DiffAbund_DIR, "SC_UV7_DESeq2_negative.tsv")
+sorted_dt_positive2 <- fread(positive_file2)
+sorted_dt_negative2 <- fread(negative_file2)
+
+# Merge the positive and negative data.tables for each pair based on Feature_ID
+merged_positive <- rbind(sorted_dt_positive1, sorted_dt_positive2)
+merged_negative <- rbind(sorted_dt_negative1, sorted_dt_negative2)
+
+# Identify common Feature_IDs
+pos_common_feature_ids <- intersect(sorted_dt_positive1$Feature_ID, sorted_dt_positive2$Feature_ID)
+neg_common_feature_ids <- intersect(sorted_dt_negative1$Feature_ID, sorted_dt_negative2$Feature_ID)
+
+# Filter merged data.tables to contain only common Feature_IDs
+filtered_positive <- merged_positive[Feature_ID %in% pos_common_feature_ids]
+filtered_negative <- merged_negative[Feature_ID %in% neg_common_feature_ids]
+
+# Write the filtered data.tables to a new tsv file
+write_tsv(filtered_positive, file.path(DiffAbund_DIR, "common_positive_features_SC_v_E25UV7.tsv"))
+write_tsv(filtered_negative, file.path(DiffAbund_DIR, "common_negative_features_SC_v_E25UV7.tsv"))
+```
+
+
+# Restructure file by hand (delete lower half, rename all rows of the species 1 and 2 columns) and reupload for further analysis
+
+
+```{r}
+file1 <- file.path(DiffAbund_DIR, "common_negative_features_Ac_v_E25UV7.tsv")
+dt <- fread(file1)
+
+
+```
+
+# Plot
+
+```{r}
+ggplot(
+  data = dt,
+  mapping = aes(
+    x = Family,
+    y = log2FoldChange,
+    colour = Species_group2
+  )
+) +
+  geom_point(
+    aes(alpha = 0.5),
+    size = 4
+  ) +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  #scale_color_manual(values = custom_colors) +  # Apply the custom color palette
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )#+
+  theme(legend.position = "none")#,      # Position the legend at the bottom
+        #axis.title.x = element_blank(),  # Remove x-axis label
+        #axis.text.x = element_blank())   # Remove x-axis tick labels
+        #axis.ticks.x = element_blank())  # Remove x-axis ticks
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_common_neg_Features_Ac_v_E25UV7.png")), width = 15, height = 8, limitsize = FALSE)
+
+```

@@ -1,0 +1,754 @@
+---
+title: "DESeq2"
+author: "Geli"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(DESeq2)
+library(dplyr)
+```
+
+
+# Load data
+
+```{r}
+SE_abs <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+SE_abs$Species <- factor(SE_abs$Species, levels =c("SC", "Ac", "E25", "UV7"))
+#SE <- SE_abs[, SE_abs$collection_date %in% c("20","35")]
+SE <- SE_abs[, SE_abs$Species %in% c("Ac", "UV7")]
+
+
+# Get the 'Family' column from the rowData of 'SE'
+family_column <- rowData(SE)$Family
+
+# Extract unique names listed under 'Family'
+unique_family_names <- unique(family_column)
+
+# Print the unique family names
+print(unique_family_names)
+#write_tsv(unique_family_names, file.path(RESULTS_DIR, "families.tsv"))
+#write.csv(unique_family_names, file = "unique_family_names.csv", row.names = FALSE)
+```
+
+
+### Run analysis on subsets in a loop
+
+# By Sample
+```{r}
+possible_subset_groups <- unique(SE$Species)
+
+Combinations <- as.data.table(expand.grid(
+  Group1 = possible_subset_groups,
+  Group2 = possible_subset_groups
+))
+
+# limit to one-sided comparisons:
+Combinations <- Combinations[as.numeric(Group1) < as.numeric(Group2)]
+
+Combinations
+```
+
+# By Timepoint
+```{r}
+possible_subset_groups <- unique(SE$collection_date)
+
+Combinations <- as.data.table(expand.grid(
+  Group1 = possible_subset_groups,
+  Group2 = possible_subset_groups
+))
+
+# limit to one-sided comparisons:
+Combinations <- Combinations[as.numeric(Group1) < as.numeric(Group2)]
+
+Combinations
+```
+
+
+# replace NAs in counts with 0s
+```{r}
+counts(SE)[is.na(counts(SE))] <- 0
+counts(SE)
+# decimal numbers cannot be used by DESeq, so you have to round numbers
+counts(SE) <- round(counts(SE))
+```
+
+# rows that sum to 0 are removed
+```{r}
+dim(counts(SE))
+
+# Calculate the row sums
+row_sums <- rowSums(counts(SE))
+
+# Identify the rows (ASVs) with a sum of 0
+rows_to_remove <- which(row_sums == 0)
+
+# Remove rows with a sum of 0 from the count matrix
+counts(SE)[-rows_to_remove, ]
+dim(counts(SE))
+```
+
+
+
+#####################################################################################################################################################################
+#####################################################################################################################################################################
+
+# DESeq for Species
+```{r}
+DESeq2_results <- data.table()
+
+# Loop 1
+for (collection_date in unique(SE$collection_date)) {
+  # Loop 2
+  for (i in seq_len(nrow(Combinations))) {
+    subset_groups <- c(
+      Combinations[i, as.character(Group2)],
+      Combinations[i, as.character(Group1)]
+    )
+    analysis_name <- str_c(subset_groups, collapse = " vs ")
+    cat(crayon::bold(collection_date, ": ", analysis_name, ":\n", sep = ""))
+
+    Subset_for_analyis <- SE[, SE$collection_date == collection_date & SE$Species %in% subset_groups]
+    #counts(Subset_for_analyis) <- round(counts(Subset_for_analyis))
+    #counts(Subset_for_analyis)[is.na(counts(Subset_for_analyis))] <- 1
+    
+    
+    deseq <- DESeqDataSetFromMatrix(
+      countData = round(counts(Subset_for_analyis)/1000) + 1, # Adding a count of 1 is optional. Dividing by 1000 or less is necessary if counts are too high (for whatever fucking reason..)
+      colData = colData(Subset_for_analyis),
+      design = ~Species
+    )
+
+    deseq <- DESeq(deseq)
+
+    plotDispEsts(deseq)
+
+    deseq_results <- results(deseq, lfcThreshold = 0.5, alpha = 0.05)
+
+    summary(deseq_results)
+    print(deseq_results)
+    plotMA(deseq_results)
+    deseq_results_dt <- as.data.table(as.data.frame(deseq_results), keep.rownames = "Feature_ID")
+    #deseq_results_dt <- deseq_results %>% as.data.table("Feature_ID")
+    deseq_results_dt[, `:=`(
+      Collection_date = collection_date,
+      Species_group1 = Combinations[i, as.character(Group1)],
+      Species_group2 = Combinations[i, as.character(Group2)]
+    )]
+
+    DESeq2_results <- rbind(
+      DESeq2_results,
+      deseq_results_dt
+    )
+  }
+}
+```
+
+```{r}
+DESeq2_results %>% setorder(Feature_ID, Collection_date, Species_group1, Species_group2)
+```
+
+```{r}
+DESeq2_results
+write_tsv(DESeq2_results, file.path(DiffAbund_DIR, "Ac_UV7_DESeq2_results_in_a_loop.tsv"))
+
+file <- file.path(DiffAbund_DIR, "SC_UV7_DESeq2_results_in_a_loop.tsv")
+DESeq2_results <- fread(file)
+```
+
+
+# Results overview
+
+```{r}
+DESeq2_results[padj <= 0.05][order(-abs(log2FoldChange))] %>% head(20)
+```
+
+```{r}
+DESeq2_results[padj <= 0.05, .(.N), by = .(Collection_date, Species_group1, Species_group2, sign(log2FoldChange))]
+```
+
+
+
+```{r}
+DESeq2_results_with_taxonomy <- merge(
+  DESeq2_results,
+  SE %>% rowData() %>% as.data.table("Feature_ID")
+)
+```
+
+# write differentially abundant Families and genus names in a file
+```{r}
+# filter out unwanted columns
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2", "Phylum", "Class", "Order", "Family", "Genus")
+filtered_dt <- DESeq2_results_with_taxonomy[padj <= 0.05]
+filtered_dt <- filtered_dt[, ..columns_to_keep, with = FALSE]
+
+# Filter out rows with non-positive log2FoldChange values
+filtered_dt_positive <- filtered_dt[log2FoldChange > 0]
+# Filter out rows with positive log2FoldChange values
+filtered_dt_negative <- filtered_dt[log2FoldChange < 0]
+
+# Sort filtered_dt_positive by Collection_date
+sorted_dt_positive <- filtered_dt_positive[order(Collection_date),]
+
+# Sort filtered_dt_negative by Collection_date
+sorted_dt_negative <- filtered_dt_negative[order(Collection_date),]
+
+
+write_tsv(sorted_dt_positive, file.path(DiffAbund_DIR, "SC_E25_DESeq2_positive.tsv"))
+write_tsv(sorted_dt_negative, file.path(DiffAbund_DIR, "SC_E25_DESeq2_negative.tsv"))
+
+
+```
+
+
+#################### Plots #####################################
+
+# add abundance data to the DESeq results
+```{r}
+# Extract the relevant columns from SE
+abundance_data <- counts(SE)
+collection_dates <- colData(SE)$collection_date
+feature_ids <- rownames(abundance_data)
+Species <- colData(SE)$Species
+
+# Create a data.table from the extracted columns
+SE_dt <- data.table(
+  Collection_date = rep(collection_dates, each = nrow(abundance_data)),
+  Feature_ID = rep(feature_ids, length(collection_dates)),
+  abundance = as.vector(t(abundance_data)),
+  Species = rep(Species, each = nrow(abundance_data))
+)
+# Define a key for merging
+setkey(SE_dt, Collection_date, Feature_ID, Species)
+
+# Subset SE data.table with only relevant columns
+SE_subset <- SE_dt[, .(Collection_date, Feature_ID, abundance, Species)]
+
+mockDESeq2_results_with_taxonomy <- DESeq2_results_with_taxonomy
+
+merged_results <- merge(
+  DESeq2_results_with_taxonomy, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+
+# Print the first few rows of the merged results
+print(head(merged_results))
+
+# Exclude rows with Species name "E25" from merged_results
+merged_results_filtered1 <- merged_results[Species != "Ac"]
+merged_results_filtered2 <- merged_results[Species != "UV7"]
+
+
+# Print the first few rows of the filtered merged results
+print(head(merged_results_filtered1))
+print(head(merged_results_filtered2))
+
+```
+
+# combined plots DESeq + Abundance
+```{r}
+library(gridExtra)
+
+# Create the scatterplot
+scatterplot <- ggplot(
+  data = merged_results[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = log2FoldChange,
+    colour = Family,
+    show_guide = FALSE
+  )
+) +
+  geom_point(
+    aes(fill = str_c(Species_group2, " vs ", Species_group1), alpha = 0.5),
+    size = 5
+  ) +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  )#+
+  
+# Create the barplot for abundance
+barplot_abundance1 <- ggplot(
+  data = merged_results_filtered1[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 4),
+   axis.title = element_text(),
+   axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance Ac")
+  
+barplot_abundance2 <- ggplot(
+  data = merged_results_filtered2[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 4),
+    #labs(x = "Abundance UV7"),  # Set x-axis label
+    axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance UV7")
+  
+# Arrange plots side by side
+combined_plot <- gridExtra::grid.arrange(scatterplot, barplot_abundance1, barplot_abundance2,  ncol = 3, widths = c(4, 1, 1))
+
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_barplot_Ac_UV7.png")),
+  plot = combined_plot,
+  width = 50,
+  height = 25,
+  units = "cm",
+  dpi = 300
+)
+```
+
+```{r}
+ggplot(
+  data = merged_results[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = log2FoldChange,
+    colour = Family,
+    show_guide = FALSE
+  )
+) +
+  geom_point(
+    aes(fill = str_c(Species_group2, " vs ", Species_group1), alpha = 0.5),
+    size = 5
+  ) +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+    coord_flip() +
+  #scale_color_manual(values = custom_colors) +  # Apply the custom color palette
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )+
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    axis.title.y = element_blank())+
+  #guides(fill="none")
+#theme(strip.background = element_blank())
+  theme(legend.position = "none")     # Position the legend at the bottom
+        
+        #axis.title.x = element_blank(),  # Remove x-axis label
+        #axis.text.x = element_blank())   # Remove x-axis tick labels
+        #axis.ticks.x = element_blank())  # Remove x-axis ticks
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_SC_E25.png")), width = 20, height = 10, limitsize = FALSE)
+
+```
+
+
+```{r}
+# Define the get_color function to retrieve the color for a given Family name
+get_color <- function(name) {
+  if (name %in% names(custom_colors)) {
+    return(custom_colors[name])
+  } else {
+    return(custom_colors["default"])
+  }
+}
+# Define a custom color palette for each unique Name in Family
+custom_colors <- c(
+  "Acidobacteriaceae (Subgroup 1)" = "steelblue3",
+  "Catenulisporaceae" = "orange2",
+  "Caulobacteraceae" = "firebrick3",
+  "Devosiaceae" = "thistle",
+  "Inquilinaceae" = "#aafae7",
+  "Micropepsaceae" = "chartreuse3",
+  "Microbacteriaceae" = "aquamarine4",
+  "Rhodanobacteraceae" = "chocolate3",
+  "Sphingobacteriaceae" = "brown1",
+  "Sphingomonadaceae" = "darkviolet",
+  "Xanthobacteraceae" = "#fb8072",
+  "Actinospicaceae" = "hotpink",
+  "Micrococcaceae" = "mediumslateblue",
+  "Micropepsaceae" = "#139696",
+  "Streptomycetaceae" = "yellow2",
+  "Beijerinckiaceae" = "#90709a",
+  "Gemmatimonadaceae" = "#dbdfa2",
+  "Reyranellaceae" = "#8dd3c7",
+  "67-14" = "#f5daa3",
+  "Dongiaceae" = "#ccebc5",
+  "Micromonosporaceae" = "#8fbcc5",
+  "Schlesneriaceae" = "#4b5172",
+  "Solibacteraceae" = "#fff397",
+  "Solirubrobacteraceae" = "#685582",
+  "Vampirovibrinaceae" = "brown",
+  "Rhizobiaceae" = "lightblue1",
+  "Burkholderiaceae" = "coral"
+)
+#"uncultured" = "#f2f2f2"
+```
+
+```{r}
+ggplot(
+  data = DESeq2_results_with_taxonomy[padj <= 0.05],
+  mapping = aes(
+    x = str_c(Species_group2, " vs ", Species_group1),
+    y = log2FoldChange
+  )
+) +
+  geom_point(
+    shape = 1,
+    alpha = 0.5
+  ) +
+  facet_grid(
+    facets = ~Collection_date
+  )
+```
+
+```{r}
+ggplot(
+  data = DESeq2_results_with_taxonomy[padj <= 0.05 & abs(log2FoldChange) > 6],
+  mapping = aes(
+    x = str_c(Species_group2, " vs ", Species_group1),
+    y = Feature_ID,
+    size = abs(log2FoldChange),
+    shape = log2FoldChange %>% sign() %>% as.factor() %>% as.factor() %>% fct_recode("up" = "1", "down" = "-1")
+  )
+) +
+  geom_point() +
+  facet_grid(
+    facets = ~Collection_date,
+    scales = "free_x",
+    space = "free_x"
+  ) +
+  labs(
+    shape = NULL
+  )
+```
+
+
+
+
+
+
+#####################################################################################################################################################################
+#####################################################################################################################################################################
+
+
+# DESeq for collection_date
+
+
+```{r}
+DESeq2_results <- data.table()
+
+# Loop 1
+for (Species in unique(SE$Species)) {
+  # Loop 2
+  for (i in seq_len(nrow(Combinations))) {
+    subset_groups <- c(
+      Combinations[i, as.character(Group2)],
+      Combinations[i, as.character(Group1)]
+    )
+    analysis_name <- str_c(subset_groups, collapse = " vs ")
+    cat(crayon::bold(Species, ": ", analysis_name, ":\n", sep = ""))
+
+    Subset_for_analyis <- SE[, SE$Species == Species & SE$collection_date %in% subset_groups]
+    #counts(Subset_for_analyis) <- round(counts(Subset_for_analyis))
+    #counts(Subset_for_analyis)[is.na(counts(Subset_for_analyis))] <- 1
+    
+    
+    deseq <- DESeqDataSetFromMatrix(
+      countData = round(counts(Subset_for_analyis)/1000) + 1, # Adding a count of 1 is optional. Dividing by 1000 or less is necessary if counts are too high (for whatever fucking reason..)
+      colData = colData(Subset_for_analyis),
+      design = ~collection_date
+    )
+
+    deseq <- DESeq(deseq)
+
+    plotDispEsts(deseq)
+
+    deseq_results <- results(deseq, lfcThreshold = 0.5, alpha = 0.05)
+
+    summary(deseq_results)
+    print(deseq_results)
+    plotMA(deseq_results)
+
+    deseq_results_dt <- deseq_results %>% as.data.table("Feature_ID")
+    deseq_results_dt[, `:=`(
+      Species = Species,
+      Collection_date1 = Combinations[i, as.character(Group1)],
+      Collection_date2 = Combinations[i, as.character(Group2)]
+    )]
+
+    DESeq2_results <- rbind(
+      DESeq2_results,
+      deseq_results_dt
+    )
+  }
+}
+```
+
+
+```{r}
+DESeq2_results %>% setorder(Feature_ID, Species, Collection_date1, Collection_date2)
+```
+
+```{r}
+DESeq2_results
+write_tsv(DESeq2_results, file.path(DiffAbund_DIR, "timepoints_20_35_DESeq2_results_in_a_loop.tsv"))
+
+```
+
+
+####################################################
+####################################################
+####################################################
+# reload containers to continue analysis from here
+```{r}
+file <- file.path(DiffAbund_DIR, "SC_UV7_DESeq2_results_in_a_loop.tsv")
+DESeq2_results <- fread(file)
+
+SE_abs <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+SE_abs$Species <- factor(SE_abs$Species, levels =c("SC", "Ac", "E25", "UV7"))
+#SE <- SE_abs[, SE_abs$collection_date %in% c("20","35")]
+SE <- SE_abs[, SE_abs$Species %in% c("SC", "UV7")]
+```
+
+
+# Results overview
+
+```{r}
+DESeq2_results[padj <= 0.05][order(-abs(log2FoldChange))] %>% head(20)
+```
+
+```{r}
+DESeq2_results[padj <= 0.05, .(.N), by = .(Species, Collection_date1, Collection_date2, sign(log2FoldChange))]
+```
+
+
+# merge DESeq2 results with taxonomy from SE file
+```{r}
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2")
+
+DESeq2 <- na.omit(DESeq2_results[, ..columns_to_keep, with = FALSE])
+
+DESeq2_results_with_taxonomy <- merge(
+  DESeq2,
+  SE %>% rowData() %>% as.data.table("Feature_ID")
+)
+
+```
+# Merge the combined DESeq results with taxonomic information
+
+```{r}
+# remove NA and uncultured rows
+# Function to remove rows with values between +2 and -2 in the 'value_column'
+remove_outliers <- function(dt, log2FoldChange) {
+  dt <- dt[!(is.na(Family) | Family == "uncultured"| Family == "Unknown Family")]
+  dt <- dt[!(log2FoldChange >= -8 & log2FoldChange <= 8)]
+  return(dt)
+}
+
+# Remove NA and uncultured rows, and outliers for each data.table
+DESeq2_results_with_taxonomy <- remove_outliers(DESeq2_results_with_taxonomy, log2FoldChange)
+
+# Then, replace the empty Genus with "unknown-" followed by the name from Family
+DESeq2_results_with_taxonomy[is.na(Genus), Genus := paste0("unknown-", Family)]
+DESeq2_results_with_taxonomy[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+
+write_tsv(DESeq2_results_with_taxonomy, file.path(DiffAbund_DIR, "filtered_DESeq2_results_with_taxonomy_UV7_SC.tsv"))
+
+```
+
+
+# write differentially abundant Families and genus names in a file
+```{r}
+# filter out unwanted columns
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Species","padj", "Collection_date1", "Collection_date2", "Phylum", "Class", "Order", "Family", "Genus")
+filtered_dt <- DESeq2_results_with_taxonomy[padj <= 0.05]
+filtered_dt <- filtered_dt[, ..columns_to_keep, with = FALSE]
+
+
+
+# Filter out rows with non-positive log2FoldChange values
+filtered_dt_positive <- filtered_dt[log2FoldChange > 0]
+# Filter out rows with positive log2FoldChange values
+filtered_dt_negative <- filtered_dt[log2FoldChange < 0]
+
+# Sort filtered_dt_positive by Collection_date
+sorted_dt_positive <- filtered_dt_positive[order(Species),]
+
+# Sort filtered_dt_negative by Collection_date
+sorted_dt_negative <- filtered_dt_negative[order(Species),]
+
+
+write_tsv(sorted_dt_positive, file.path(DiffAbund_DIR, "timepoints_11_20_DESeq2_positive.tsv"))
+write_tsv(sorted_dt_negative, file.path(DiffAbund_DIR, "timepoints_11_20_DESeq2_negative.tsv"))
+
+
+```
+
+
+# Plots
+
+```{r}
+ggplot(
+  data = DESeq2_results_with_taxonomy[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = log2FoldChange,
+    colour = Family,
+    show_guide = FALSE
+  )
+) +
+  geom_point(
+    aes(fill = str_c(Collection_date2, " vs ", Collection_date1), alpha = 0.5),
+    size = 5
+  ) +
+  facet_grid(
+    facets = ~Species
+  ) +
+    coord_flip() +
+  #scale_color_manual(values = custom_colors) +  # Apply the custom color palette
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )+
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    axis.title.y = element_blank())+
+  #guides(size = "legend", colour = "none")
+  
+  theme(legend.position = "none")      # Position the legend at the bottom
+        
+        #axis.title.x = element_blank(),  # Remove x-axis label
+        #axis.text.x = element_blank())   # Remove x-axis tick labels
+        #axis.ticks.x = element_blank())  # Remove x-axis ticks
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_timepoint_20_v_35.png")), width = 20, height = 10, limitsize = FALSE)
+
+```
+
+
+```{r}
+# Define the get_color function to retrieve the color for a given Family name
+get_color <- function(name) {
+  if (name %in% names(custom_colors)) {
+    return(custom_colors[name])
+  } else {
+    return(custom_colors["default"])
+  }
+}
+# Define a custom color palette for each unique Name in Family
+custom_colors <- c(
+  "Acidobacteriaceae (Subgroup 1)" = "steelblue3",
+  "Catenulisporaceae" = "orange2",
+  "Caulobacteraceae" = "firebrick3",
+  "Devosiaceae" = "thistle",
+  "Inquilinaceae" = "#aafae7",
+  "Micropepsaceae" = "chartreuse3",
+  "Microbacteriaceae" = "aquamarine4",
+  "Rhodanobacteraceae" = "chocolate3",
+  "Sphingobacteriaceae" = "brown1",
+  "Sphingomonadaceae" = "darkviolet",
+  "Xanthobacteraceae" = "#fb8072",
+  "Actinospicaceae" = "hotpink",
+  "Micrococcaceae" = "mediumslateblue",
+  "Micropepsaceae" = "#139696",
+  "Streptomycetaceae" = "yellow2",
+  "Beijerinckiaceae" = "#90709a",
+  "Gemmatimonadaceae" = "#dbdfa2",
+  "Reyranellaceae" = "#8dd3c7",
+  "67-14" = "#f5daa3",
+  "Dongiaceae" = "#ccebc5",
+  "Micromonosporaceae" = "#8fbcc5",
+  "Schlesneriaceae" = "#4b5172",
+  "Solibacteraceae" = "#fff397",
+  "Solirubrobacteraceae" = "#685582",
+  "Vampirovibrinaceae" = "brown",
+  "Rhizobiaceae" = "lightblue1",
+  "Burkholderiaceae" = "coral"
+)
+#"uncultured" = "#f2f2f2"
+```
+
+```{r}
+ggplot(
+  data = DESeq2_results_with_taxonomy[padj <= 0.05],
+  mapping = aes(
+    x = str_c(Species_group2, " vs ", Species_group1),
+    y = log2FoldChange
+  )
+) +
+  geom_point(
+    shape = 1,
+    alpha = 0.5
+  ) +
+  facet_grid(
+    facets = ~Collection_date
+  )
+```
+
+```{r}
+ggplot(
+  data = DESeq2_results_with_taxonomy[padj <= 0.05 & abs(log2FoldChange) > 6],
+  mapping = aes(
+    x = str_c(Species_group2, " vs ", Species_group1),
+    y = Feature_ID,
+    size = abs(log2FoldChange),
+    shape = log2FoldChange %>% sign() %>% as.factor() %>% as.factor() %>% fct_recode("up" = "1", "down" = "-1")
+  )
+) +
+  geom_point() +
+  facet_grid(
+    facets = ~Collection_date,
+    scales = "free_x",
+    space = "free_x"
+  ) +
+  labs(
+    shape = NULL
+  )
+```

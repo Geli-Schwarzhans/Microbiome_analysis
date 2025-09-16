@@ -1,0 +1,243 @@
+---
+title: "Ordinations using mia"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(scater)
+library(phyloseq)
+#library(microViz)
+library(ggplot2)
+library("vegan")
+library(Matrix)
+library(dplyr)
+#library(ANCOMBC)
+```
+
+
+# Load containers
+```{r}
+# !!! we are loading SE_abs here, but saving it to the SE variable !!!
+#SEall <- readRDS(file.path(RD_DIR, "SE_all.rds"))
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+#SE
+# Subsetting on the fly:
+#SE0 <- SE[, SE$collection_date %in% c("0")]
+#SE5 <- SE[, SE$collection_date %in% c("5")]
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+#SE20 <- SE[, SE$collection_date %in% c("20")]
+#SE35 <- SE[, SE$collection_date %in% c("35")]
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+#SEf5 <- SE[, SE$collection_date %in% c("5","11", "20","35")]
+#SEtest <- SE[, SE$collection_date %in% c("0", "5","11", "20","35")]
+SEtest <- SE[, SE$collection_date %in% c("35")]
+```
+
+# Filter superfluous libraries
+
+First we remove any samples that are actually not needed, or you want to try visualizing without.
+
+```{r}
+SE_superfluous <- SEtest[, SEtest$JMF_sample_ID %in% c("JMF-2209-03-0097")]
+SE_superfluous %>% ncol()
+SE_superfluous %>% colData() %>% as_tibble() %>% View()
+
+#SEtest <- SEtest[!SEtest$JMF_sample_ID %in% c("JMF-2209-03-0115"), ]
+common_cols <- intersect(colnames(SEtest), colnames(SE_superfluous))
+SEtest <- SEtest[, !colnames(SEtest) %in% common_cols]
+```
+# To inspect the metadata using the RStudio UI, we can use such commands:
+
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+```
+
+```{r}
+# let's remind ourselves which assay we have available to us
+assayNames(SE)
+# make custom order of the Samples
+SEtest$Species <- factor(SEtest$Species, levels =c("SC","Ac", "E25","UV7"))
+```
+
+```{r}
+PS <- makePhyloseqFromTreeSummarizedExperiment(SEtest)
+#PS <- convertToPhyloseq(SEtest)
+PS
+#saveRDS(PS, file.path(RD_DIR, "PS_with66.rds"))
+```
+
+
+## Beta diversity and ordination
+```{r Ordination, include=T}
+# Ordination plots
+# do first ordination plot with log transformed (for normalisation - not ideal way of normalising!) data to check again for outliers
+
+# PCoA plot with Bray-Curtis distance
+#pslog <- transform_sample_counts(PS, function(x) log(1 + x)) #normalise by log transformation
+#psclr <- microbiome::transform(PS, "clr") #normalise by centered log transformation
+
+
+# NMDS plot
+Sample_col <- c("grey15","steelblue3", "orange2","firebrick3")
+#dist = phyloseq::distance(PS, method="jaccard", binary = T)
+dist = phyloseq::distance(PS, method="bray")
+ordination = ordinate(PS, method="NMDS", distance=dist, k=2)
+# Extract NMDS coordinates from the metaMDS result
+#nmds_coordinates <- dist$points
+
+
+
+plot_ordination(PS, ordination, color = "Species") + 
+  theme_classic() +
+  geom_point(size = 2) +
+  stat_ellipse(aes(group = Species), type = "t") +
+  scale_color_manual(values = Sample_col) +
+  annotate("text", x = Inf, y = -Inf, hjust = 1.1, vjust = -0.5,
+           label = paste("Stress:", round(ordination$stress, 3)),
+           size = 3) +
+  theme(strip.background = element_blank(),
+        legend.title = element_blank(),
+        legend.position = "none")
+
+# bray distance same result as jaccard, wunifrac more clear?
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_abs_NMDS_Assiscript_T20_final.png")), width = 3, height = 3, limitsize = FALSE)
+
+##############################################
+####### manual NMDS for more dimensions ######
+##############################################
+
+Sample_col <- c("grey15","steelblue3", "orange2","firebrick3")
+shape <- c(16, 17, 15, 3)
+# Because the final result depends on the initial 
+# random placement of the points 
+# we`ll set a seed to make the results reproducible
+set.seed(2)
+
+# Here, we perform the final analysis and check the result
+dist = phyloseq::distance(PS, method="bray")
+NMDS <- metaMDS(dist, k = 2, trymax = 1000, trace = T)
+
+NMDS_points <- as.data.frame(scores(NMDS, display = "sites"))
+NMDS_points$SampleID <- rownames(NMDS_points)
+metadata <- data.frame(sample_data(PS))
+metadata$SampleID <- rownames(metadata)
+
+NMDS_data <- merge(NMDS_points, metadata, by = "SampleID")
+
+ggplot(NMDS_data, aes(x = NMDS1, y = NMDS2, color = Species)) +
+  geom_point(aes(shape=Species), size = 3) +
+  scale_shape_manual(values = shape)+
+  stat_ellipse(aes(group = Species), type = "t") +
+  scale_color_manual(values = Sample_col) +
+  annotate("text", x = Inf, y = -Inf, hjust = 1.1, vjust = -0.5,
+           label = paste("Stress:", round(NMDS$stress, 3)),
+           size = 4) +
+  theme_classic() +
+   theme(axis.title.x  = element_text(angle=0, vjust=0.5, size=15)) +
+    theme(axis.text.x  = element_text(angle=0, vjust=0.5, size=10)) +
+    theme(axis.text.y  = element_text(angle=90, vjust=0.5, size=10)) +
+    theme(axis.title.y  = element_text(angle=90, vjust=2.2, size=15)) +
+  theme(strip.background = element_blank(),
+        legend.title = element_blank(),
+        legend.position = "none")
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_abs_NMDS_T35.svg")), width = 3, height = 3, limitsize = FALSE)
+
+# Run PERMANOVA using adonis2
+set.seed(123)  # For reproducibility
+permanova_result <- adonis2(dist ~ Species, data = metadata, permutations = 999)
+###################################################################
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+# ANOSIM to test
+anosim(dist, sample_data(PS2_taxtree)$Season)
+
+
+
+
+
+out.pcoa.log <- ordinate(pslog,  method = "MDS", distance = "bray")
+evals <- out.pcoa.log$values[,1]
+plot_ordination(pslog, out.pcoa.log, color = "Species") +
+  labs(col = "Species") +
+  theme_classic() +
+  stat_ellipse(aes(group = Species)) +
+  scale_color_manual(values = Sample_col) +
+  coord_fixed(sqrt(evals[2] / evals[6]))	
+ggsave("PCoA__Bray_Assi.png")
+#PerMANOVA to check for significance
+adonis(evals ~ sample_data(pslog)$Species)
+
+# do MDS plot with log 
+# out.uf.log <- ordinate(pslog, method = "MDS", distance = "unifrac")
+# evals <- out.uf.log$values$Eigenvalues
+# plot_ordination(pslog, out.uf.log, color = "Season") +
+#   labs(col = "Season") +
+#   theme_classic() +
+#   stat_ellipse(aes(group = Season)) +
+#   coord_fixed(sqrt(evals[2] / evals[1]))
+
+out.wuf.log <- ordinate(pslog, method = "MDS", distance = "bray")
+evals <- out.wuf.log$values$Eigenvalues
+plot_ordination(pslog, out.wuf.log, color = "Species") +
+  labs(col = "Species") +
+  theme_classic() +
+  stat_ellipse(aes(group = Species)) +
+  scale_color_manual(values = Sample_col) +
+  coord_fixed(sqrt(evals[2] / evals[6]))
+
+p3 <- plot_scree(out.wuf.log, "wunifrac")
+#p2 <- plot_scree(out.uf.log, "unifrac")
+p1 <- plot_scree(out.pcoa.log, "bray")
+ggsave("scree_plot_bray.png")
+#grid.arrange(p1, p2, p3, ncol=3)
+grid.arrange(p1, p3, ncol=2)
+
+##### assess stress and dimensions #############
+# First step is to calculate a distance matrix. See PCOA for more information about the distance measures
+# Here we use bray-curtis distance, which is recommended for abundance data
+dist = phyloseq::distance(PS, method="bray")
+
+# In this part, we define a function NMDS.scree() that automatically 
+# performs a NMDS for 1-10 dimensions and plots the nr of dimensions vs the stress
+NMDS.scree <- function(x) { #where x is the name of the data frame variable
+  plot(rep(1, 10), replicate(10, metaMDS(x, autotransform = F, k = 1)$stress), xlim = c(1, 10),ylim = c(0, 0.30), xlab = "# of Dimensions", ylab = "Stress", main = "NMDS stress plot")
+  for (i in 1:10) {
+    points(rep(i + 1,10),replicate(10, metaMDS(x, autotransform = F, k = i + 1)$stress))
+  }
+}
+
+# Use the function that we just defined to choose the optimal nr of dimensions
+NMDS.scree(dist)
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_abs_NMDS_stressplot_T11.png")), width = 4, height = 4, limitsize = FALSE)
+
+
+```

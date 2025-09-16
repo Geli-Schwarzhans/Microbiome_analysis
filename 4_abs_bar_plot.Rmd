@@ -1,0 +1,509 @@
+---
+title: "Bubble plot"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(RColorBrewer)
+library(gridExtra)
+library(tidyverse)
+library(ggbreak)
+
+```
+
+
+# Load container
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+
+#SEtest <- SE[, SE$collection_date %in% c("35")]
+SEtest <- SE[, SE$collection_date %in% c("0","5","11","20","35")]
+
+# Remove rows with Family values "NA" or "uncultured"
+SEtest <- subset(SEtest, !(Family == "NA" | Family == "uncultured" | Family == "Unknown Family"))
+# Get the 'Family' column from the rowData of 'SE'
+family_column <- rowData(SEtest)$Family
+domain_column <- rowData(SEtest)$Domain
+# Extract unique names listed under 'Family'
+unique_family_names <- unique(family_column)
+
+# Print the unique family names
+print(unique_family_names)
+```
+
+```{r}
+# make custom order of the Samples
+SEtest$Species <- factor(SEtest$Species, levels =c("SC","Ac", "E25","UV7"))
+
+```
+
+
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+```
+
+# Prepare data
+
+```{r}
+Data <-
+  SEtest %>%
+  meltAssay(assay_name = "counts", add_row_data = TRUE, add_col_data = TRUE) %>%
+  tidyr::unite("Lineage", Domain:ASV_ID, sep = " > ", remove = FALSE) %>%
+  as.data.table()
+
+#Data <- Data[relabundance > 0] # zeros are optional in bubble plots
+#Data <- Data[, relabundance := relabundance * 100] # convert to %
+Data[, Lineage := Lineage %>% str_replace("( (NA|uncultured) >)+", " … >")]
+
+# Select taxa for plot
+
+#selected_taxa <- getTopTaxa(SEtest, top = 100, method = "median", assay_name = "relabundance")
+selected_taxa <- getTopTaxa(SEtest, top = 100, method = "median", assay_name = "counts")
+```
+
+
+# Prepare data at family level
+```{r}
+# Aggregate ASVs by Family
+library(dplyr)
+# Aggregate ASVs by Family and sum up their counts
+family_counts <- Data %>% 
+  group_by(Family, Species) %>% 
+  #summarize(Total_Count = sum(relabundance))
+  summarize(Total_Count = sum(counts))
+# Get the top 10 families based on Total_Count
+top_families <- family_counts %>%
+  top_n(10, Total_Count) %>%
+  pull(Family)
+top_families <- family_counts %>%
+  slice_max(Total_Count, n = 10, with_ties = FALSE) %>%
+  pull(Family)
+```
+
+# Plot taxa
+
+```{r}
+plot_data <- Data[FeatureID %in% selected_taxa]
+plot_data$Lineage %>%
+  unique() %>%
+  sort() %>%
+  cat(sep = "\n")
+# Filter plot_data to include only the top 10 families
+plot_data_top10 <- plot_data[plot_data$Family %in% top_families, ]
+```
+
+# Get relative abundance info about specific genera
+```{r}
+SEtest$Group <- factor(SEtest$Group, levels =c("0-SC", "0-Ac", "0-E25","0-UV7","5-SC", "5-Ac","5-E25","5-UV7","11-SC", "11-Ac","11-E25","11-UV7","20-SC", "20-Ac","20-E25","20-UV7","35-SC", "35-Ac","35-E25","35-UV7"))
+
+rel_Data <-
+  SEtest %>%
+  meltAssay(assay_name = "relabundance", add_row_data = TRUE, add_col_data = TRUE) %>%
+  tidyr::unite("Lineage", Domain:ASV_ID, sep = " > ", remove = FALSE) %>%
+  as.data.table()
+
+genera_counts <- rel_Data %>% 
+  group_by(Genus, Species, collection_date, Replicate) %>% 
+  summarize(Total_Count = sum(relabundance))
+
+genus_summary <- genera_counts %>% # the names of the new data frame and the data frame to be summarised
+    group_by(Genus, Species, collection_date) %>%   # the grouping variable
+    summarise(mean_value = mean(Total_Count, na.rm = TRUE),  # calculates the mean of each group
+              sd_value = sd(Total_Count, na.rm = TRUE), # calculates the standard deviation of each group
+              n_value = sum(!is.na(Total_Count)),  # calculates the sample size per group
+              SE_value = sd(Total_Count, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+
+write.csv(genus_summary, "relabundancew_genera.csv", row.names = FALSE)
+```
+
+
+#simple stacked Bar plot
+
+```{r}
+my_color = c("Acidobacteriaceae (Subgroup 1)" ="steelblue3", Actinospicaceae="pink", Alcaligenaceae ="red2", Catenulisporaceae = "orange2",Caulobacteraceae = "firebrick3",Devosiaceae = "#8dd3c7", Inquilinaceae="#aafae7", Micropepsaceae="chartreuse3", Micrcoccaceae="chartreuse", Microbacteriaceae="aquamarine4", Rhodanobacteraceae="chocolate3", Sphingobacteriaceae="#139696", Sphingomonadaceae = "darkviolet", Xanthobacteraceae = "#fb8072", Oxalobacteraceae="hotpink", Micrococcaceae="mediumslateblue", Streptomycetaceae="yellow2", Beijerinckiaceae="#90709a", Gemmatimonadaceae="#dbdfa2",Reyranellaceae = "coral", Acetobacteraceae = "#f5daa3",Paenibacillaceae = "#ccebc5" ,Micromonosporaceae = "brown1", Pseudomonadaceae = "red3", Chthoniobacteraceae= "chartreuse3", Solirubrobacteraceae= "#f2f2f2", Mycobacteriaceae= "brown", Rhizobiaceae = "lightblue1", Burkholderiaceae = "aquamarine", Chitinophagaceae = "#685582", Nocardioidaceae = "#fff397", Nocardiaceae = "steelblue", Pedosphaeraceae= "orange4", Vampirovibrionaceae = "chocolate4", Schlesneriaceae ="thistle", Dongiaceae = "#f2f")
+
+
+ggplot(plot_data_top10, aes(x = User_sample_ID, y = counts, fill = Family)) +
+  geom_bar(stat = "identity") +
+  #scale_fill_manual(values= c("steelblue3", "orange2","firebrick3","thistle","chartreuse3","aquamarine4","chocolate3","cyan4","brown1","darkviolet","goldenrod1","hotpink","mediumslateblue","yellow","brown2"))+
+  scale_fill_manual(values= my_color)+
+  #scale_fill_brewer(palette= "Paired") +
+  #theme(axis.text.x = element_text(angle = 45, hjust =1)) +
+  theme_light() +
+  theme(axis.text.x  = element_text(angle=0, vjust=0.5, size=10)) +
+  theme(axis.title.x  = element_blank())+
+  theme(axis.text.y  = element_blank())+
+  #theme(legend.position="none")+
+  xlab("") +
+  ylab("16S rDNA copies/g sediment") +
+  #facet_grid(. ~ collection_date, scales = "free_y", space = "free_y", switch = "y") +
+  facet_wrap(Species~., scales="free_y",nrow=8) +
+   scale_y_break(c(100000000000,100000000000), scales = .2)+  # Include both below and above the break
+   coord_flip() +
+  xlab("") +
+  ylab("abs abundance") 
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_legendabs_barplot_T20.svg")), width = 6, height = 8, limitsize = FALSE)
+
+```
+
+# check abundance of specific groups
+
+```{r}
+Nitrifyer = c("Nitrosomonadaceae" ="Nitrosomonadaceae")
+
+# Convert strategy named vector to a data frame
+family_df <- data.frame(
+  Family = names(Nitrifyer),
+  Nitrifyer = unname(Nitrifyer),
+  stringsAsFactors = FALSE
+)
+# Join the strategy letter to plot_data_top10
+plot_data <- Data %>%
+  left_join(family_df, by = "Family")
+
+Replicate_counts <- plot_data %>% 
+  group_by(Family) %>% 
+  summarize(Total_Count = sum(counts))
+
+# exclude the rest
+plot_data_filtered <- plot_data %>%
+  filter(Family %in% c("Nitrosomonadaceae"))
+```
+
+
+# plot stacked barplot only highlighting the chosen family
+```{r}
+
+ggplot(plot_data_filtered, aes(x = User_sample_ID, y = counts, fill = Nitrifyer)) +
+  geom_bar(stat = "identity") +
+  #scale_fill_manual(values= c("steelblue3", "orange2","firebrick3","thistle","chartreuse3","aquamarine4","chocolate3","cyan4","brown1","darkviolet","goldenrod1","hotpink","mediumslateblue","yellow","brown2"))+
+  #scale_fill_manual(values= my_color)+
+  #scale_fill_brewer(palette= "Paired") +
+  #theme(axis.text.x = element_text(angle = 45, hjust =1)) +
+  theme_light() +
+  theme(axis.text.x  = element_text(angle=0, vjust=0.5, size=10)) +
+  theme(axis.title.x  = element_blank())+
+  theme(axis.text.y  = element_blank())+
+  #theme(legend.position="none")+
+  xlab("") +
+  ylab("absolute abundance") +
+  #facet_grid(. ~ collection_date, scales = "free_y", space = "free_y", switch = "y") +
+  facet_wrap(Species~., scales="free_y",nrow=8) +
+  # scale_y_break(c(100000000000,100000000000), scales = .2)+  # Include both below and above the break
+   coord_flip() +
+  xlab("") +
+  ylab("abs abundance") 
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_Nitrifyer_barplot_T20.svg")), width = 6, height = 8, limitsize = FALSE)
+
+```
+
+
+
+#########################################################################################################################
+#########################################################################################################################
+############################################## absolute Strategy analysis ############################################### 
+#########################################################################################################################
+#########################################################################################################################
+```{r}
+strategy = c("Acidobacteriaceae (Subgroup 1)" ="k", Caulobacteraceae = "r", Devosiaceae = "k", Microbacteriaceae="r", Rhodanobacteraceae="k", Sphingobacteriaceae="r",Sphingomonadaceae = "r",Xanthobacteraceae = "k", Streptomycetaceae="k", Beijerinckiaceae="k", Reyranellaceae = "k", Acetobacteraceae = "r", Rhizobiaceae = "r", Burkholderiaceae = "r", Chitinophagaceae = "r", Pseudomonadaceae ="r", Nocardioidaceae ="k")
+
+# Convert strategy named vector to a data frame
+strategy_df <- data.frame(
+  Family = names(strategy),
+  strategy = unname(strategy),
+  stringsAsFactors = FALSE
+)
+
+# Join the strategy letter to plot_data_top10
+plot_data <- Data %>%
+  left_join(strategy_df, by = "Family")
+
+
+Replicate_counts <- plot_data %>% 
+  group_by(SampleID) %>% 
+  summarize(Total_Count = sum(counts))
+#Data<- Data %>%
+ # left_join(strategy_df, by = "Family")
+```
+
+
+# plot strategies
+```{r}
+
+ggplot(plot_data, aes(x = User_sample_ID, y = counts, fill = strategy)) +
+  geom_bar(stat = "identity") +
+  #scale_fill_manual(values= c("steelblue3", "orange2","firebrick3","thistle","chartreuse3","aquamarine4","chocolate3","cyan4","brown1","darkviolet","goldenrod1","hotpink","mediumslateblue","yellow","brown2"))+
+  #scale_fill_manual(values= my_color)+
+  #scale_fill_brewer(palette= "Paired") +
+  #theme(axis.text.x = element_text(angle = 45, hjust =1)) +
+  theme_light() +
+  theme(axis.text.x  = element_text(angle=0, vjust=0.5, size=10)) +
+  theme(axis.title.x  = element_blank())+
+  theme(axis.text.y  = element_blank())+
+  #theme(legend.position="none")+
+  xlab("") +
+  ylab("16S rDNA copies/g sediment") +
+  #facet_grid(. ~ collection_date, scales = "free_y", space = "free_y", switch = "y") +
+  facet_wrap(Species~., scales="free_y",nrow=8) +
+  facet_wrap(Species~., scales="free_y",nrow=8) +
+   scale_y_break(c(100000000000,100000000000), scales = .2)+  # Include both below and above the break
+   coord_flip() +
+  xlab("") +
+  ylab("abs abundance") 
+
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_T35_abs_strategy_barplot.png")), width = 6, height = 8, limitsize = FALSE)
+
+```
+
+
+#########################################################################################################################
+############################ Statistical analysis in a loop #############################################################
+#########################################################################################################################
+
+# Create new data.table with count
+```{r}
+strategy_table <- plot_data[, .(collection_date, Replicate, Species, strategy, counts)]
+# Assuming your data is called dt
+#condensed_counts <- strategy_table[, .(total_count = sum(counts, na.rm = TRUE)), 
+ #                      by = .(collection_date, Species, strategy, Replicate)]
+condensed_counts <- strategy_table[, .(total_count = counts), 
+                       by = .(collection_date, Species, strategy, Replicate)]
+
+counts_summary <- condensed_counts %>% # the names of the new data frame and the data frame to be summarised
+    group_by(Species, collection_date, strategy) %>%   # the grouping variable
+    summarise(mean_value = mean(total_count, na.rm = TRUE),  # calculates the mean of each group
+              sd_value = sd(total_count, na.rm = TRUE), # calculates the standard deviation of each group
+              n_value = sum(!is.na(total_count)),  # calculates the sample size per group
+              SE_value = sd(total_count, na.rm = TRUE)/sqrt(n())) # calculates the standard error of each group
+```
+
+###### test for normality ######
+```{r}
+r_condensed_counts <- condensed_counts[condensed_counts$strategy == "r", c(1,2,3,4,5)]
+k_condensed_counts <- condensed_counts[condensed_counts$strategy == "k", c(1,2,3,4,5)]
+
+SC <- r_condensed_counts[r_condensed_counts$Species == "SC", c(1,2,3,4,5)]
+inputSC <-  SC[SC$collection_date == "35",c(1,2,3,4,5)]
+shapiro.test(inputSC$total_count) #  normal
+
+AC <- r_condensed_counts[r_condensed_counts$Species == "Ac", c(1,2,3,4,5)]
+inputAc <-  AC[AC$collection_date == "5",c(1,2,3,4,5)]
+shapiro.test(inputAc$total_count) #  normal
+
+E25 <- r_condensed_counts[r_condensed_counts$Species == "E25", c(1,2,3,4,5)]
+inputE <-  E25[E25$collection_date == "5",c(1,2,3,4,5)]
+shapiro.test(inputE$total_count) #   normal
+
+UV7 <- r_condensed_counts[r_condensed_counts$Species == "UV7", c(1,2,3,4,5)]
+inputUV7 <-  UV7[UV7$collection_date == "20",c(1,2,3,4,5)]
+shapiro.test(inputUV7$total_count) #  normal
+
+
+ggplot(inputAc, aes(x=total_count)) + 
+  geom_density()
+```
+
+#################### Sort the data by strategy  #################################
+```{r}
+r_condensed_counts <- condensed_counts[condensed_counts$strategy == "r", c(1,2,3,4,5)]
+
+library(dplyr)
+library(rstatix)
+library(tidyr)
+library(purrr)
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_timepoint_nonparam <- function(r_condensed_counts, collection_date) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ Species, data = r_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(r_condensed_counts$total_count, r_condensed_counts$Species, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Sample1 = Var1,
+           Sample2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Timepoint = collection_date,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Timepoint, Sample1, Sample2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_samplediff_nonparam <- r_condensed_counts %>%
+  group_by(collection_date) %>%
+  group_split() %>%
+  map_df(~process_timepoint_nonparam(.x, unique(.x$collection_date)))
+
+write.csv(results_samplediff_nonparam, "R_Stats_wilcox_results_sample_differences_all.csv", row.names = FALSE)
+#############################################################################################################################
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_sample_nonparam <- function(r_condensed_counts, Species) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ collection_date, data = r_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(r_condensed_counts$total_count, r_condensed_counts$collection_date, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Time1 = Var1,
+           Time2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Sample = Species,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Sample, Time1, Time2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_time_nonparam <- r_condensed_counts %>%
+  group_by(Species) %>%
+  group_split() %>%
+  map_df(~process_sample_nonparam(.x, unique(.x$Species)))
+
+
+
+write.csv(results_time_nonparam, "R_wilcox_Stats_results_change_over_time.csv", row.names = FALSE)
+#############################################################################################################################
+
+```
+
+```{r}
+k_condensed_counts <- condensed_counts[condensed_counts$strategy == "k", c(1,2,3,4,5)]
+
+library(dplyr)
+library(rstatix)
+library(tidyr)
+library(purrr)
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_timepoint_nonparam <- function(k_condensed_counts, collection_date) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ Species, data = k_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(k_condensed_counts$total_count, k_condensed_counts$Species, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Sample1 = Var1,
+           Sample2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Timepoint = collection_date,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Timepoint, Sample1, Sample2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_samplediff_nonparam <- k_condensed_counts %>%
+  group_by(collection_date) %>%
+  group_split() %>%
+  map_df(~process_timepoint_nonparam(.x, unique(.x$collection_date)))
+
+write.csv(results_samplediff_nonparam, "K_Stats_wilcox_results_sample_differences_all.csv", row.names = FALSE)
+#############################################################################################################################
+k_condensed_counts$collection_date <- factor(k_condensed_counts$collection_date, levels =c("0","5","11","20","35"))
+
+# Function to process one timepoint with Kruskal-Wallis + pairwise Wilcoxon
+process_sample_nonparam <- function(k_condensed_counts, Species) {
+  # Kruskal-Wallis test
+  kruskal_res <- kruskal.test(total_count ~ collection_date, data = k_condensed_counts)
+  kruskal_p <- kruskal_res$p.value
+  
+  # Pairwise Wilcoxon test (with BH correction)
+  pwilcox <- pairwise.wilcox.test(k_condensed_counts$total_count, k_condensed_counts$collection_date, p.adjust.method = "BH")
+  
+  # Convert matrix of results into tidy dataframe
+  pw_df <- as.data.frame(as.table(pwilcox$p.value)) %>%
+    filter(!is.na(Freq)) %>%
+    rename(Time1 = Var1,
+           Time2 = Var2,
+           Wilcox_pvalue = Freq) %>%
+    mutate(
+      Sample = Species,
+      Kruskal_pvalue = kruskal_p,
+      Wilcox_sig = case_when(
+        Wilcox_pvalue < 0.001 ~ "***",
+        Wilcox_pvalue < 0.01 ~ "**",
+        Wilcox_pvalue < 0.05 ~ "*",
+        TRUE ~ "ns"
+      )
+    ) %>%
+    select(Sample, Time1, Time2, Kruskal_pvalue, Wilcox_pvalue, Wilcox_sig)
+  
+  return(pw_df)
+}
+
+# Apply to each timepoint
+results_time_nonparam <- k_condensed_counts %>%
+  group_by(Species) %>%
+  group_split() %>%
+  map_df(~process_sample_nonparam(.x, unique(.x$Species)))
+
+
+
+write.csv(results_time_nonparam, "K_wilcox_Stats_results_change_over_time.csv", row.names = FALSE)
+#############################################################################################################################
+
+```
+
+

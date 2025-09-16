@@ -1,0 +1,479 @@
+---
+title: "nCOMBC"
+author: "Geli"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(ANCOMBC)
+library(phyloseq)
+library(microbiome)
+library(nloptr)
+library(tibble)
+library(DT)
+```
+
+```{r}
+#PS_abs <- readRDS(file.path(RD_DIR, "PS_abs.rds"))
+#PS_abs
+SE_abs <- readRDS(file.path(RD_DIR, "SE_abs.rds"))
+```
+
+#Subset the data
+
+```{r}
+# Set the levels for Species and Timepoints
+SE_abs$Species <- factor(SE_abs$Species, levels = c("SC", "Ac", "E25", "UV7"))
+SE_abs$collection_date <- factor(SE_abs$collection_date, levels = c("0", "5", "11", "20", "35"))
+
+
+# Get all pairwise combinations of Species and Timepoints
+species_combinations <- combn(levels(SE_abs$Species), 2, simplify = FALSE)
+timepoint_combinations <- combn(levels(SE_abs$collection_date), 2, simplify = FALSE)
+species <-  c("SC","Ac", "E25", "UV7") # Define samples as a vector of strings
+timepoints <- c("0","5","11","20","35") # Define timepoints as a vector of strings
+#################################################################################################################
+#################################################################################################################
+possible_subset_groups <- unique(SE_abs$Species)
+
+Combinations <- as.data.table(expand.grid(
+  Group1 = possible_subset_groups,
+  Group2 = possible_subset_groups
+))
+
+# limit to one-sided comparisons:
+Combinations <- Combinations[as.numeric(Group1) < as.numeric(Group2)]
+
+Combinations
+# Loop 1
+for (collection_date in unique(SE_abs$collection_date)) {
+  # Loop 2
+  for (i in seq_len(nrow(Combinations))) {
+    subset_groups <- c(
+      Combinations[i, as.character(Group2)],
+      Combinations[i, as.character(Group1)]
+    )
+    analysis_name <- str_c(subset_groups, collapse = " vs ")
+    cat(crayon::bold(collection_date, ": ", analysis_name, ":\n", sep = ""))
+
+    subset_data_species <- SE_abs[, SE_abs$collection_date == collection_date & SE_abs$Species %in% subset_groups]
+    #Subset_for_analyis <- subset_samples(PS_abs, sample_data(PS_abs)$collection_date %in% subset_groups)
+
+    if (nrow(Subset_for_analyis) == 0) {
+      cat("Empty subset, skipping...\n")
+      next
+      
+       # Create the object name for the Species combination
+    species_obj_name <- paste0("SE", collection_date[1], subset_groups[1], subset_groups[2])
+        print(species_obj_name)
+    
+    #subset_data_species <- SE_abs[, SE_abs$collection_date == timepoint & SE_abs$Species %in% species_comb]
+
+    # Create the SummarizedExperiment object
+   # se_obj <- SummarizedExperiment(assays(subset_data_species), colData = colData(subset_data_species))
+
+    # Assign the SummarizedExperiment object to the corresponding object name
+    assign(species_obj_name, subset_data_species)
+      
+    }
+  }
+#################################################################################################################
+#################################################################################################################
+# Loop through each pairwise combination and create summarized experiment objects
+for (i in seq_along(species_combinations)) {
+  for (j in seq_along(timepoints)) {
+    # Get the current Species combination and Timepoint combination
+    species_comb <- species_combinations[[i]]
+    timepoint <- timepoints[j]
+            print(species_comb)
+
+    # Create the object name for the Species combination
+    species_obj_name <- paste0("SE", timepoints[1], species_comb[1], species_comb[2])
+        print(species_obj_name)
+    
+    subset_data_species <- SE_abs[, SE_abs$collection_date == timepoint & SE_abs$Species %in% species_comb]
+
+    # Create the SummarizedExperiment object
+    se_obj <- SummarizedExperiment(assays(subset_data_species), colData = colData(subset_data_species))
+
+    # Assign the SummarizedExperiment object to the corresponding object name
+    assign(species_obj_name, se_obj)
+  }
+}
+
+# Loop through each pairwise combination and create summarized experiment objects
+for (i in seq_along(species_combinations)) {
+  for (j in seq_along(timepoint_combinations)) {
+    # Get the current Species combination and Timepoint combination
+    species_comb <- species_combinations[[i]]
+    timepoints <- timepoint_combinations[[j]]
+    
+    # Create the object name for the Species combination
+    species_obj_name <- paste0("SE", timepoints[1], species[1], species[2])
+        print(species_obj_name)
+
+    # Create the object name for the Timepoint combination
+    timepoint_obj_name <- paste0("SE", species[1], timepoints[1], timepoints[2])
+    print(timepoint_obj_name)
+    # Subset the data based on the current Species combination and Timepoint combination
+    #subset_data <- SE_abs[SE_abs$Species %in% species & SE_abs$collection_date %in% timepoints, ]
+
+    subset_data_species <- SE_abs[, SE_abs$collection_date == timepoints & SE_abs$Species %in% species]
+    subset_data_time <- SE_abs[, SE_abs$collection_date %in% timepoints & SE_abs$Species %in% species]
+
+    # Create the SummarizedExperiment object
+    se_obj <- SummarizedExperiment(assays(subset_data_species), colData = colData(subset_data_species))
+    se_obj <- SummarizedExperiment(assays(subset_data_time), colData = colData(subset_data_time))
+
+    # Assign the SummarizedExperiment object to the corresponding object name
+    assign(species_obj_name, se_obj)
+    assign(timepoint_obj_name, se_obj)
+  }
+}
+```
+
+# inspect you data 
+```{r}
+SE0SCAc %>% colData() %>% as_tibble() %>% View()
+```
+
+```{r}
+# let's remind ourselves which assay we have available to us
+assayNames(SE_abs)
+# make custom order of the Samples
+SE_abs$Species <- factor(SE_abs$Species, levels =c("SC","Ac", "E25","UV7"))
+SE_abs$collection_date <- factor(SE_abs$collection_date, levels =c("0","5", "11","20","35"))
+SE0 <- SE_abs 
+SE0$Species <- factor(SE0$Species, levels =c("SC","Ac", "E25","UV7"))
+SE0$collection_date <- factor(SE0$collection_date, levels =c("0"))
+
+round(counts(SE0)/1000)
+
+```
+### ANCOMBC in a loop in SummarizedExperiment ###
+
+### run analysis acc. to https://bioconductor.org/packages/release/bioc/vignettes/ANCOMBC/inst/doc/ANCOMBC2.html #####
+
+```{r}
+set.seed(123)
+# It should be noted that we have set the number of bootstrap samples (B) equal 
+# to 10 in the 'trend_control' function for computational expediency. 
+# However, it is recommended that users utilize the default value of B, 
+# which is 100, or larger values for optimal performance.
+output <- ancombc2(
+  data = SE0,
+  assay_name = "counts",
+  tax_level = "Family",
+  fix_formula = "Species",
+  rand_formula = NULL,
+  p_adj_method = "holm",
+  pseudo = 0,
+  pseudo_sens = TRUE,
+  prv_cut = 0.10,
+  s0_perc = 0.05,
+  group = "Species",
+  struc_zero = TRUE,
+  neg_lb = TRUE,
+  alpha = 0.05,
+  n_cl = 1,
+  verbose = TRUE,
+  global = TRUE,
+  pairwise = TRUE
+)
+  
+  dunnet = TRUE,
+  trend = TRUE,
+  trend_control = list(
+    contrast = list(
+      matrix(c(1, -1, 0), nrow = 1),
+      matrix(c(1, 0, -1), nrow = 1)
+      ),
+    node = list(2)  # Specify the number of groups being compared
+  )
+)
+```
+
+# Run analysis manually
+
+```{r}
+SE_abs$Species <- factor(SE_abs$Species, levels =c("SC","Ac", "E25","UV7"))
+SE_abs$collection_date <- factor(SE_abs$collection_date, levels =c("0","5", "11","20","35"))
+
+results <- data.frame()
+ancom_fdr <- data.frame()
+ancom_logfold <- data.frame()
+
+#out <- ancombc(data = SE0ES, assay_name = "counts", formula = "Species", tax_level = "Family", neg_lb = TRUE, struc_zero = FALSE, alpha = 0.05)
+out <- ancombc2(data = SE_abs, assay_name = "counts", fix_formula = "Species + collection_date", rand_formula = "(Species | collection_date)", tax_level = "Family", neg_lb = TRUE, struc_zero = FALSE)
+
+
+# Store the results in the data frames
+    res <- data.frame(
+      rowNames = row.names(out$res$lfc),
+      lfc = unlist(out$res$lfc),
+      se = unlist(out$res$se),
+      W = unlist(out$res$W),
+      p_val = unlist(out$res$p_val),
+      q_val = unlist(out$res$q_val),
+      diff_abn = unlist(out$res$diff_abn)
+    )
+  #res <- data.frame(rowNames ,lfc , se, W,p_val,q_val,diff_abn)
+    # Filter the results based on q-value and log-fold change
+    taxon_names <- grep("^Family:|Class:|Order:|Phylum:", res$lfc, value = TRUE)
+    res$rowNames <- c(taxon_names, taxon_names, taxon_names)
+
+    
+    ancom_fdr_subset <- res %>% dplyr::filter(q_val < 0.05)
+    ancom_logfold_subset <- ancom_fdr_subset %>% dplyr::filter(lfc < -2.0 | lfc > 2.0)
+    
+    # Add information about the subset
+    ancom_fdr_subset$collection_date <- "0"
+    ancom_fdr_subset$Species <- "SC-v-E25"
+    ancom_logfold_subset$collection_date <- "0"
+    ancom_logfold_subset$Species <- "SC-v-E25"
+    
+    # Append the results to the overall data frames
+    results <- rbind(results, res)
+    ancom_fdr <- rbind(ancom_fdr, ancom_fdr_subset)
+    ancom_logfold <- rbind(ancom_logfold, ancom_logfold_subset)
+
+
+# make a df with all taxa and beta (log fold change) data
+T0merge <- merge(Ac_res, res, by = 0, all.x=TRUE, all.y=TRUE)
+merge1 <- data.frame(T0merge$lfc.x, T0merge$lfc.y, rowNames=T0merge$rowNames)
+merge1_A <- merge(merge1, Ac_res, by = 0, all =TRUE)
+merge2 <- data.frame(merge1_A$T0merge, merge1_A$SE_SA_merge.lfc.y, merge1_A$lfc, rowNames=merge1_A$rowNames)
+merge2_WS <- merge(merge2, WS_res, by = 0, all =TRUE)
+merge_all <- data.frame(merge2_WS$merge1_AW.SS_SA_merge.beta.x,merge2_WS$merge1_AW.SS_SA_merge.beta.y,merge2_WS$merge1_AW.beta,merge2_WS$beta, row.names=merge2_WS$Row.names)
+
+```
+
+# Run analysis on subsets in a loop
+
+```{r}
+possible_subset_groups <- unique(SE_abs$Species)
+
+Combinations <- as.data.table(expand.grid(
+  Group1 = possible_subset_groups,
+  Group2 = possible_subset_groups
+))
+
+# limit to one-sided comparisons:
+Combinations <- Combinations[as.numeric(Group1) < as.numeric(Group2)]
+
+Combinations
+```
+
+```{r}
+DESeq2_results <- data.table()
+results <- data.frame()
+ancom_fdr <- data.frame()
+ancom_logfold <- data.frame()
+
+
+
+# Loop 1
+for (collection_date in unique(SE_abs$collection_date)) {
+  # Loop 2
+  for (i in seq_len(nrow(Combinations))) {
+    subset_groups <- c(
+      Combinations[i, as.character(Group2)],
+      Combinations[i, as.character(Group1)]
+    )
+    analysis_name <- str_c(subset_groups, collapse = " vs ")
+    cat(crayon::bold(collection_date, ": ", analysis_name, ":\n", sep = ""))
+
+    Subset_for_analyis <- SE_abs[, SE_abs$collection_date == collection_date & SE_abs$Species %in% subset_groups]
+    #Subset_for_analyis <- subset_samples(PS_abs, sample_data(PS_abs)$collection_date %in% subset_groups)
+
+    if (nrow(Subset_for_analyis) == 0) {
+      cat("Empty subset, skipping...\n")
+      next
+    }
+    
+    #date <- Subset_for_analyis$collection_date[1]
+    #species <- Subset_for_analyis$SpeciesSpecies[c(1,10)]
+    ################## ANCOMBC #######################
+    out <- ancombc(data = Subset_for_analyis, assay_name = "counts", formula = "Species", tax_level = "Family", neg_lb = TRUE, struc_zero = FALSE, alpha = 0.05)
+    
+    # Store the results in the data frames
+    res <- data.frame(
+      rowNames = row.names(out$res$lfc),
+      lfc = unlist(out$res$lfc),
+      se = unlist(out$res$se),
+      W = unlist(out$res$W),
+      p_val = unlist(out$res$p_val),
+      q_val = unlist(out$res$q_val),
+      diff_abn = unlist(out$res$diff_abn)
+    )
+    # Filter the results based on q-value and log-fold change
+    ancom_fdr_subset <- res %>% dplyr::filter(q_val < 0.05)
+    ancom_logfold_subset <- ancom_fdr_subset %>% dplyr::filter(lfc < -2.0 | lfc > 2.0)
+    
+    # Add information about the subset
+    #ancom_fdr_subset$collection_date <- collection_date
+    #ancom_fdr_subset$Species <- as.character(i)
+    #ancom_logfold_subset$collection_date <- collection_date
+    #ancom_logfold_subset$Species <- as.character(i)
+    
+    # Append the results to the overall data frames
+    results <- rbind(results, res)
+    ancom_fdr <- rbind(ancom_fdr, ancom_fdr_subset)
+    ancom_logfold <- rbind(ancom_logfold, ancom_logfold_subset)
+    ##################################################
+  }}
+
+```
+  
+
+### ANCOMBC in a loop in Phyloseq ###
+```{r}
+# Create empty data frames to store the results
+results <- data.frame()
+ancom_fdr <- data.frame()
+ancom_logfold <- data.frame()
+
+# Define the tiempoint subsets
+timepoints <- c("0","5","11","20","35") # Define timepoints as a vector of strings
+
+# Define the sample subsets
+sample_subset1 <- list(c("SC", "Ac"),c("SC", "E25"),c("SC", "UV7"),c("Ac", "E25"), c("Ac", "UV7"), c("E25", "UV7"))
+
+sample_subset1 <- c("SC", "Ac")
+sample_subset2 <- c("SC", "E25")
+sample_subset3 <- list(c("SC", "Ac"),c("SC", "E25"),c("SC", "UV7"),c("Ac", "E25"), c("Ac", "UV7"), c("E25", "UV7"))
+sample_subset4 <- list(c("SC", "Ac"),c("SC", "E25"),c("SC", "UV7"),c("Ac", "E25"), c("Ac", "UV7"), c("E25", "UV7"))
+sample_subset5 <- list(c("SC", "Ac"),c("SC", "E25"),c("SC", "UV7"),c("Ac", "E25"), c("Ac", "UV7"), c("E25", "UV7"))
+sample_subset6 <- list(c("SC", "Ac"),c("SC", "E25"),c("SC", "UV7"),c("Ac", "E25"), c("Ac", "UV7"), c("E25", "UV7"))
+
+#samples <- list(c("SC","Ac","E25","UV7"))
+
+# Loop over timepoints and sample subsets
+for (i in timepoints) {
+  for (subset in sample_subset1) {
+        #print(subset)
+        #print(i)
+    # Perform ANCOM-BC analysis
+    # Subset the phyloseq object to include both abundance data and sample metadata
+    sub_timepoint <- subset_samples(PS_abs, sample_data(PS_abs)$collection_date %in% i)
+    print(sample_data(sub_timepoint))
+    #print(dim(sample_data(sub_timepoint)))
+    # Check the class/type of timepoints
+print(class(timepoints))
+
+# Check the class/type of sample_subsets
+print(class(subset))
+print(subset)
+    # Check the class/type of sample_subsets
+print(class(subset))
+    sub_species <-subset_samples(sub_timepoint, sample_data(sub_timepoint)$Species %in% subset)
+    print(sample_data(sub_species))
+    #subset_data <- input.long[variable == timepoints[i] & Sample %in% subset]
+    #dim(sample_data(sub_species))
+  }}
+    out <- ancombc(phyloseq = sub_species, formula = "Species", group = "Species", neg_lb = TRUE, conserve = TRUE, global = FALSE)
+    
+    # Store the results in the data frames
+    res <- data.frame(
+      row.names = row.names(out$res$beta),
+      beta = unlist(out$res$beta),
+      se = unlist(out$res$se),
+      W = unlist(out$res$W),
+      p_val = unlist(out$res$p_val),
+      q_val = unlist(out$res$q_val),
+      diff_abn = unlist(out$res$diff_abn)
+    )
+  
+    # Filter the results based on q-value and log-fold change
+    ancom_fdr_subset <- res %>% dplyr::filter(q_val < 0.05)
+    ancom_logfold_subset <- ancom_fdr_subset %>% dplyr::filter(beta < -2.0 | beta > 2.0)
+    
+    # Add information about the subset
+    ancom_fdr_subset$collection_date <- date
+    ancom_fdr_subset$Species <- species
+    ancom_logfold_subset$collection_date <- date
+    ancom_logfold_subset$Species <- species
+    
+    # Append the results to the overall data frames
+    results <- rbind(results, res)
+    ancom_fdr <- rbind(ancom_fdr, ancom_fdr_subset)
+    ancom_logfold <- rbind(ancom_logfold, ancom_logfold_subset)
+  }
+}
+
+# Print the results
+print(results)
+print(ancom_fdr)
+print(ancom_logfold)
+
+```
+
+```{r}
+out <- ancombc(
+  PS_abs,
+  formula = "collection_date", 
+  p_adj_method = "fdr", 
+  lib_cut = 0,
+  group = "Species", 
+  struc_zero = TRUE, 
+  neg_lb = TRUE,
+  alpha = 0.05, 
+  global = TRUE # multi group comparison will be deactivated automatically 
+)
+
+PS0  <- subset_samples(PS_abs, sample_data(PS_abs)$collection_date %in% c("0"))
+PS0AE <-subset_samples(PS0, sample_data(PS0)$Species %in% c("Ac","E25"))
+out_0AE <- ancombc(phyloseq = PS0AE, formula = "Species",  group = "Species", neg_lb = T, conserve = TRUE, global = FALSE)
+
+AE0_res <- data.frame(row.names = row.names(out_0AE$res$beta),
+  beta = unlist(out_0AE$res$beta),
+  se = unlist(out_0AE$res$se),
+  W = unlist(out_0AE$res$W),
+  p_val = unlist(out_0AE$res$p_val),
+  q_val = unlist(out_0AE$res$q_val),
+  diff_abn = unlist(out_0AE$res$diff_abn))
+AE0_ancom_fdr <- AE0_res %>% dplyr::filter(q_val < 0.05)
+AE0_ancom_logfold <- AE0_ancom_fdr %>% dplyr::filter(beta < -2.0 | beta > 2.0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+set.seed(123)
+out = ancombc2(data = PS_abs, assay_name = "counts", tax_level = NULL,
+                  fix_formula = "collection_date + Species", rand_formula = NULL,
+                  p_adj_method = "holm", pseudo = 0, pseudo_sens = TRUE,
+                  prv_cut = 0.10, lib_cut = 1000, s0_perc = 0.05,
+                  group = "Species", struc_zero = TRUE, neg_lb = TRUE,
+                  alpha = 0.05, n_cl = 2, verbose = TRUE,
+                  global = TRUE, pairwise = FALSE, 
+                  dunnet = FALSE, trend = FALSE,
+                  iter_control = list(tol = 1e-5, max_iter = 20, 
+                                      verbose = FALSE),
+                  em_control = list(tol = 1e-5, max_iter = 100),
+                  lme_control = NULL, mdfdr_control = NULL, 
+                  trend_control = NULL)
+
+res_prim = output$res
+tab_sens = output$pseudo_sens_tab
+```

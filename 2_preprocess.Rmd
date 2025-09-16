@@ -1,0 +1,413 @@
+---
+title: "Preprocess"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+source(file.path("helpers", "write_flattened.R"), chdir = TRUE)
+source(file.path("helpers", "trim_empty.R"), chdir = TRUE)
+library(mia)
+```
+
+
+# Load container
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_raw.rds"))
+SE
+```
+
+To inspect the metadata using the RStudio UI, we can use such commands:
+
+```{r}
+SE %>% colData() %>% as_tibble() %>% View()
+```
+
+# subset 
+```{r}
+#SE <- SE[, SE$collection_date %in% c("0")]
+```
+
+# Filter superfluous libraries
+
+First we remove any samples that are actually not needed.
+
+```{r}
+#SE_superfluous <- SE[, SE$User_sample_ID == c("1","2","3","4","5", "6", "7", "0-2", "5-6")]
+SE_superfluous <- SE[, SE$JMF_library_ID %in% c("JMF-2209-03-0001A","JMF-2209-03-0002A","JMF-2209-03-0003A","JMF-2209-03-0004A","JMF-2209-03-0005A", "JMF-2209-03-0006A", "JMF-2209-03-0007A","JMF-2209-03-0001B","JMF-2209-03-0002B","JMF-2209-03-0003B","JMF-2209-03-0004B","JMF-2209-03-0005B", "JMF-2209-03-0006B", "JMF-2209-03-0007B","JMF-2209-03-0008A","JMF-2209-03-0009A", "JMF-2209-03-0010A", "JMF-2209-03-0042A","JMF-2209-03-0055A","JMF-2209-03-0115A","JMF-2209-03-0140A")]
+#SE_superfluous <- SE[, SE$JMF_library_ID %in% c("JMF-2209-03-0008A","JMF-2209-03-0009A", "JMF-2209-03-0010A","JMF-2209-03-0010B", "JMF-2209-03-0011A","JMF-2209-03-0012A", "JMF-2209-03-0013A", "JMF-2209-03-0014A", "JMF-2209-03-0015A", "JMF-2209-03-0016A", "JMF-2209-03-0017A", "JMF-2209-03-0017A", "JMF-2209-03-0018A", "JMF-2209-03-0018A", "JMF-2209-03-0019A", "JMF-2209-03-0020A", "JMF-2209-03-0021A", "JMF-2209-03-0022A","JMF-2209-03-0023A", "JMF-2209-03-0024A", "JMF-2209-03-0025A", "JMF-2209-03-0026A", "JMF-2209-03-0027A","JMF-2209-03-0028A","JMF-2209-03-0029A","JMF-2209-03-0030A","JMF-2209-03-0031A","JMF-2209-03-0032A","JMF-2209-03-0033A","JMF-2209-03-0034A","JMF-2209-03-0035A", "JMF-2209-03-0036A","JMF-2209-03-0042A","JMF-2209-03-0055A","JMF-2209-03-0081A","JMF-2209-03-0066A","JMF-2209-03-0115A","JMF-2209-03-0140A")]
+
+SE_superfluous %>% ncol()
+SE_superfluous %>% colData() %>% as_tibble() %>% View()
+
+```
+
+```{r}
+SE <- SE[, !colnames(SE) %in% colnames(SE_superfluous)] %>% trim_empty()
+SE
+```
+
+
+# Filter contaminations using decontam
+
+First we extract the required data from our container.
+
+```{r}
+# transposed (vegan style) matrix needed!
+matrix_for_decontam <- SE %>%
+  assay() %>%
+  as.matrix() %>%
+  t()
+
+# negative controls as a boolean vector, NAs are treated as non-negative controls
+SE_negative_controls <- SE[, SE$Group == "neg_extr"]
+negative_controls_logical <- rownames(matrix_for_decontam) %in% colnames(SE_negative_controls)
+
+# print the negative control library IDs, as a sanity check
+rownames(matrix_for_decontam)[negative_controls_logical]
+```
+
+Now we run decontam.
+
+```{r}
+# the default threshold for decontam is 0.1
+decontam_results <-
+  decontam::isContaminant(matrix_for_decontam, neg = negative_controls_logical, threshold = 0.1) %>%
+  as.data.table(keep.rownames = "Feature_ID")
+```
+
+Export the decontam results.
+
+```{r}
+write_tsv(decontam_results, file.path(RESULTS_DIR, "decontam_results_all_finalremovedSamples.tsv"))
+```
+
+Lets have a look a the results.
+
+```{r}
+table(decontam_results$contaminant)
+```
+
+And then extract the contaminant ASVs.
+
+```{r}
+contaminants <- decontam_results[contaminant == TRUE, Feature_ID]
+SE_decontam_contaminants <- SE[rownames(SE) %in% contaminants]
+rowData(SE_decontam_contaminants) %>%
+  as.data.frame() %>%
+  rmarkdown::paged_table()
+```
+
+Perform the filtering on the container. We will also remove the negative controls now, as they are no longer needed.
+
+```{r}
+SE <- SE[
+  !rownames(SE) %in% rownames(SE_decontam_contaminants),
+  !colnames(SE) %in% colnames(SE_negative_controls)
+] %>% trim_empty()
+SE
+```
+
+ALTERNATIVE: `mia` includes a wrapper for decontam too, `mia::isContaminant`.
+
+
+# Filter contaminations manually
+
+Some types of contamination can always be manually removed as well.
+
+```{r}
+# Unclassified: these are often eukaryotic SSU. Use BLAST to decide if you want to filter these.
+#SE_Unclassified <- SE[rowData(SE)$Domain %in% "Unclassified"]
+#SE_Unclassified %>% nrow()
+
+# Eukaryota: for archaeal/bacterial SSU primers, always remove Eukaryota
+SE_Eukaryota <- SE[rowData(SE)$Domain %in% "Eukaryota"]
+SE_Eukaryota %>% nrow()
+
+# Chloroplast: always remove
+SE_Chloroplast <- SE[rowData(SE)$Order %in% "Chloroplast"]
+SE_Chloroplast %>% nrow()
+
+# Mitochondria: always remove
+SE_Mitochondria <- SE[rowData(SE)$Family %in% "Mitochondria"]
+SE_Mitochondria %>% nrow()
+
+# Very common wet lab contamination in our data. Here, you can also specific additional ASVs manually, if needed.
+SE_known_contaminants <- SE[rowData(SE)$ASV_ID %in% c("ASV_lwc_fxo", "ASV_qdi_vob", "some_other_ASV_ID")]
+SE_known_contaminants %>% nrow()
+
+# it can makes sense to remove sequences which are too short (or too long)
+features_wrong_seqlength <- names(referenceSeq(SE))[width(referenceSeq(SE)) < 100]
+
+# Recommendations for some primer pairs:
+# "amoA_Betaproteobacteria_alt":
+# features_wrong_seqlength <- names(referenceSeq(SE))[width(referenceSeq(SE)) < 452]
+# "amoA_comammox_A/B":
+# features_wrong_seqlength <- names(referenceSeq(SE))[width(referenceSeq(SE)) < 382]
+```
+
+```{r}
+SE <- SE[!rownames(SE) %in% c(
+  # rownames(SE_Unclassified), # for this project, we won't remove Unclassified. This is PROJECT-SPECIFIC!
+  rownames(SE_Eukaryota),
+  rownames(SE_Chloroplast),
+  rownames(SE_Mitochondria),
+  rownames(SE_known_contaminants),
+  features_wrong_seqlength
+)] %>% trim_empty()
+SE
+```
+
+
+# SWITCH TO SAMPLES
+
+We were working on library level until now, but it is time to switch to sample level, i.e., add up all counts from technical replicates.
+
+The first value for each library/sample metadata field will be used, i.e., all data related to libraries is potentially wrong, so we remove it.
+
+```{r}
+SE <- mergeCols(SE, SE$JMF_sample_ID)
+
+# Remove library metadata, as it is not needed/useful any more (optional)
+metadata_fields <- names(colData(SE))
+remove_metadata_fields <- metadata_fields[
+  match("JMF_library_ID", metadata_fields):
+  (match("User_sample_ID", metadata_fields) - 1)
+]
+remove_metadata_fields %>% cat(sep = "\n")
+colData(SE) <- colData(SE)[, !metadata_fields %in% remove_metadata_fields]
+
+SE
+```
+
+
+# Alternative assays
+
+Here we can perform normalizations and transformations, so we do not need to do them later on.
+
+```{r}
+#SE <- relAbundanceCounts(SE) # shortcut for transformCounts(SE, method = "relabundance")
+#SE <- transformCounts(SE, method = "relabundance")
+SE <- transformCounts(SE, method = "clr", pseudocount = 1)
+```
+
+NOTE: Depending on further processing and filtering, transformation may need to be redone. Transformations are never automatically recalculated.
+
+
+# Alternative feature sets
+
+## "top" features
+
+This subset should not include any of the low abundant features (“noise”).
+
+```{r}
+# number of ASVs
+nrow(SE)
+```
+
+Lets extract only the top 2000 ASVs. This is PROJECT-SPECIFIC!
+
+```{r}
+top_features <- getTopTaxa(SE, top = 1000, method = "mean", abund_values = "relabundance")
+```
+
+```{r}
+altExp(SE, "top") <- SE[top_features, ]
+altExp(SE, "top")
+```
+
+An alternative to abundance is using prevalence, see `subsetByPrevalentTaxa()`.
+
+## taxonomic agglomeration
+
+```{r}
+for (rank in taxonomyRanks(SE)) {
+  cat(crayon::bold(rank), "\n", sep = "")
+
+  agglomerate_tree <- !rank %in% c("Domain", "Phylum") # workaround for https://github.com/microbiome/mia/issues/174
+  if (is.null(rowTree(SE))) agglomerate_tree <- FALSE
+  new_se <- agglomerateByRank(SE, rank, agglomerateTree = agglomerate_tree)
+
+  # ensure unique row names, this happens when taxa like "uncultured" are used in the database
+  # (this already is dealt with in case of agglomerateTree = TRUE)
+  rownames(new_se) <- rownames(new_se) %>% make.unique()
+
+  # ASV_ID is still filled (because it is a non standard field), we will set it to NA manually here, so there is no confusion
+  rowData(new_se)$ASV_ID <- NA_character_
+
+  # re-calculate CLR (no need to re-calculate relabundance, it would be the same anyway)
+  new_se <- transformCounts(new_se, method = "clr", pseudocount = 1)
+
+  new_se %>%
+    nrow() %>%
+    print()
+  new_se %>% write_flattened(file.path(RESULTS_DIR, g("Flattened_SE_finalremovedSamples.{rank}.tsv")))
+
+  TOP_N_TAXA <- 100
+  top_features <- getTopTaxa(new_se, top = min(TOP_N_TAXA, nrow(new_se)), method = "mean", abund_values = "relabundance")
+  top_se <- new_se[top_features, ]
+  top_se %>% write_flattened(file.path(RESULTS_DIR, g("Flattened_SE.{rank}_top_finalremovedSamples.tsv")))
+  altExp(new_se, "top") <- top_se
+
+  altExp(SE, rank) <- new_se
+}
+
+## Acc. to CahtGPT:
+#The code loops through different taxonomic ranks (stored in the taxonomyRanks object) and for each rank, it creates a new summarized experiment object (new_se) by agglomerating the data at that taxonomic rank using the agglomerateByRank function. The new summarized experiment is then processed to ensure unique row names, set ASV_ID to NA, and transform the counts to CLR values using the transformCounts function.
+
+#After these steps, the code identifies the top N taxa (100 in this case, or fewer if there are fewer than 100 taxa) based on their mean relative abundance using the getTopTaxa function, and creates a new summarized experiment object (top_se) containing only the top taxa. The flattened version of these summarized experiments are then written to file using the write_flattened function.
+
+#Finally, the code sets the alternative expression slot of the original summarized experiment SE for the current taxonomic rank to the new summarized experiment (new_se), and sets the alternative expression slot to the top summarized experiment (top_se). This means that the original summarized experiment SE is being modified in each iteration of the loop, with the alternative expression slot being updated for each taxonomic rank.
+```
+
+ALTERNATIVE: This can be also done with one single command: `splitByRanks`. However, then we can not do all the tweaking we do in the loop.
+
+
+# Identify singletons
+```{r}
+
+# Calculate total count per row
+total_count <- rowSums(counts(SE))
+
+# Identify singletons
+singletons <- which(total_count == 1)
+
+# Subset SE to only include singletons
+SE_singletons <- SE[singletons, ]
+
+# Print number of singletons
+cat("Number of singletons: ", length(singletons), "\n")
+# Save container
+```
+## TSE
+
+```{r}
+SE
+saveRDS(SE, file.path(RD_DIR, "SE_all_finalremovedSamples.rds"))
+```
+
+```{r}
+SE %>% write_flattened(file.path(RESULTS_DIR, "Flattened_SE_finalremovedSamples.tsv"))
+SE %>% write_flattened(file.path(RESULTS_DIR, "Flattened_relabundance_SE_finalremovedSamples.tsv"), "relabundance")
+SE %>% write_flattened(file.path(RESULTS_DIR, "Flattened_clr_SE_finalremovedSamples.tsv"), "clr")
+SE %>%
+  altExp("top") %>%
+  write_flattened(file.path(RESULTS_DIR, "Flattened_SE.top_finalremovedSamples.tsv"))
+```
+
+
+## phyloseq
+
+```{r}
+PS <- makePhyloseqFromTreeSummarizedExperiment(SE)
+
+PS
+saveRDS(PS, file.path(RD_DIR, "PS_all_finalremovedSamples.rds"))
+```
+
+```{r}
+stopifnot(isTRUE(all.equal(
+  meltAssay(SE)$counts,
+  as.data.table(speedyseq::psmelt(PS))[order(OTU, Sample), Abundance]
+)))
+```
+
+
+
+## ampvis2
+
+```{r}
+# https://gist.github.com/KasperSkytte/8d0ca4206a66be7ff6d76fc4ab8e66c6
+devtools::source_gist("8d0ca4206a66be7ff6d76fc4ab8e66c6")
+AV <- phyloseq_to_ampvis2(PS)
+
+# fix taxonomic rank name mismatch issue
+AV$tax$Kingdom <- rowData(SE)$Domain
+
+AV
+saveRDS(AV, file.path(RD_DIR, "AV.rds"))
+```
+
+```{r}
+stopifnot(isTRUE(all.equal(
+  meltAssay(SE)$counts,
+  ampvis2::amp_export_long(AV)[order(OTU, JMF_sample_ID), count]
+)))
+```
+
+
+# Sample subsets
+
+## subset by yield
+
+Lets extract only samples with at least 3000 read pairs. This is PROJECT-SPECIFIC! Between 500 and 3000 is a good cut-off for most projects.
+
+```{r}
+sample_yield <-
+  SE %>%
+  scuttle::perCellQCMetrics()
+
+high_yield_samples <-
+  sample_yield %>%
+  subset(sum >= 5000)
+
+high_yield_samples_min <- high_yield_samples$sum %>% min()
+high_yield_samples_min
+```
+
+```{r}
+SE_deep <- SE[, colnames(SE) %in% rownames(high_yield_samples)] %>% trim_empty()
+```
+# SE_deep not rarefied
+```{r}
+SE_deep
+saveRDS(SE_deep, file.path(RD_DIR, "SE_deep_all_finalremovedSamples.rds"))
+```
+This is a good place to add a rarefied assay as well. NOTE: This does not rarefy the altExp data. If rarefied altExp data is need, this could be done here too via a loop.
+
+```{r}
+assay(SE_deep, "rarefied") <-
+  SE_deep %>%
+  assay("counts") %>%
+  t() %>%
+  vegan::rrarefy(sample = high_yield_samples_min) %>%
+  t()
+
+# mia will support this nativity in the next release, see subsampleCounts
+```
+
+```{r}
+SE_deep
+saveRDS(SE_deep, file.path(RD_DIR, "SE_deep_rare_all_finalremovedSamples.rds"))
+```
+
+```{r}
+SE_deep %>% write_flattened(file.path(RESULTS_DIR, "Flattened_SE_deep.tsv"))
+SE_deep %>% write_flattened(file.path(RESULTS_DIR, "Flattened_rarefied_SE_deep.tsv"), "rarefied")
+```
+
+
+
+## subset by sample type
+
+This is based on `SE_deep`!
+
+```{r}
+#SE_subset <- SE_deep[, SE_deep$Group %in% c("0-SC", "5-SC", "11-SC", "20-SC", "35-SC", "0-Ac", "5-Ac", "11-Ac", "20-Ac", "35-Ac", "0-E25", "5-E25", "11-E25",  "20-E25", "35-E25", "0-UV7", "5-UV7", "11-UV7", "20-UV7", "35-UV7")] %>% trim_empty()
+#SE_subset
+#saveRDS(SE_subset, file.path(RD_DIR, "SE_all_groups.rds"))
+```

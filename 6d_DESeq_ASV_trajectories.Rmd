@@ -1,0 +1,232 @@
+---
+title: "pheatmap demo"
+author: "Geli"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#rmove all data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(gplots)
+library(ggh4x)
+
+```
+
+
+# Load containers
+
+```{r}
+file1 <- file.path(DiffAbund_DIR, "filtered_DESeq2_results_with_taxonomy_E25_SC.tsv")
+DESeq2_results1 <- fread(file1)
+file2 <- file.path(DiffAbund_DIR, "filtered_DESeq2_results_with_taxonomy_UV7_SC.tsv")
+DESeq2_results2 <- fread(file2)
+file1 <- file.path(DiffAbund_DIR, "filtered_DESeq2_results_with_taxonomy_Ac_E25.tsv")
+DESeq2_results1 <- fread(file1)
+file2 <- file.path(DiffAbund_DIR, "filtered_DESeq2_results_with_taxonomy_Ac_UV7.tsv")
+DESeq2_results2 <- fread(file2)
+file3 <- file.path(DiffAbund_DIR, "filtered_DESeq2_results_with_taxonomy_SC_Ac.tsv")
+DESeq2_results3 <- fread(file3)
+```
+
+# subsetting the data
+```{r}
+E25_T0 <- DESeq2_results1[Collection_date %in% "0"]
+E25_T5 <- DESeq2_results1[Collection_date %in% "5"]
+E25_T11 <- DESeq2_results1[Collection_date %in% "11"]
+E25_T20 <- DESeq2_results1[Collection_date %in% "20"]
+E25_T35 <- DESeq2_results1[Collection_date %in% "35"]
+
+UV7_T0 <- DESeq2_results2[Collection_date %in% "0"]
+UV7_T5 <- DESeq2_results2[Collection_date %in% "5"]
+UV7_T11 <- DESeq2_results2[Collection_date %in% "11"]
+UV7_T20 <- DESeq2_results2[Collection_date %in% "20"]
+UV7_T35 <- DESeq2_results2[Collection_date %in% "35"]
+
+Ac_T0 <- DESeq2_results3[Collection_date %in% "0"]
+Ac_T5 <- DESeq2_results3[Collection_date %in% "5"]
+Ac_T11 <- DESeq2_results3[Collection_date %in% "11"]
+Ac_T20 <- DESeq2_results3[Collection_date %in% "20"]
+Ac_T35 <- DESeq2_results3[Collection_date %in% "35"]
+
+
+```
+
+
+################## ASV trajectories for single timepoint ASVs (not just ones that occurr in multiple timepoints) #################### 
+
+# subsetting the data
+```{r}
+#create column ASV-Genus just for the plot legend
+filtered_data <- DESeq2_results3
+filtered_data$ASV_Genus <- paste(filtered_data$ASV_ID, filtered_data$Genus, sep = " - ")
+
+
+# Define the chosen set of families
+#chosen_families <- c("Sphingobacteriaceae", "Micropepsaceae", "Reyranellaceae", "Sphingomonadaceae", "Chitinophagaceae", "Burkholderiaceae", #"Chthoniobacteraceae")
+# Define the chosen set of families
+#chosen_families <- c("Sphingobacteriaceae",  "Chitinophagaceae", "Chthoniobacteraceae")
+#chosen_genera <- c("Mucilaginibacter","Chitinophaga","Edaphobaculum","Chthoniobacter")
+# Define the chosen set of families
+chosen_families <- c("Pseudomonadaceae",  "Sphingobacteriaceae", "Chthoniobacteraceae","Reyranellaceae")
+chosen_genera <- c("Mucilaginibacter","Pseudomonas","Chthoniobacter","Reyranella")
+
+# Filter the rows based on chosen families
+filtered_data <- filtered_data[Family %in% chosen_families]
+filtered_data <- filtered_data[Genus %in% chosen_genera]
+
+# Filter the rows based on chosen families
+filtered_families <- filtered_data[Family %in% chosen_families]
+
+# Splitting the data.table by 'Family' column
+subsets <- split(filtered_families, by = "Genus")
+
+# Printing each subset and assigning them to separate variables
+for (family_name in names(subsets)) {
+  assign(paste0("subset_", family_name), subsets[[family_name]])
+  print(subsets[[family_name]])
+}
+
+
+my_color = c("Mucilaginibacter" ="#139696",
+               "Reyranella" = "coral",
+               "Chthoniobacter"= "chartreuse3",
+             "Pseudomonas" ="red3")
+my_shapes = c("Mucilaginibacter" =8,
+              "Chthoniobacter"= 7,
+              "Reyranella" = 6, 
+              "Pseudomonas" =9)
+```
+
+
+# Dotplots
+```{r}
+# Combine ASV_ID and Genus into a new variable for the legend
+plots <- lapply(names(subsets), function(family_name) {
+  ggplot(subsets[[family_name]], aes(x = Collection_date, y = log2FoldChange, color = Genus)) +
+    #geom_point(size = 2) +
+    #geom_violin(aes(group = interaction(Collection_date, Genus)))+
+    geom_point(aes(shape = Genus), size = 3, position = position_dodge(width = 2)) +
+    scale_shape_manual(values = my_shapes)+ #c(8,21,11,15,10,1,25,5,0,7,3)
+        scale_color_manual(values = my_color)+
+   # geom_point() +
+    coord_cartesian(ylim=c(-20,20),xlim=c(0,35))+
+    scale_x_continuous(breaks = c(0, 5, 11, 20, 35)) +
+    scale_y_continuous(breaks = c(-20, -10, 0, 10, 20)) +
+    labs(title = paste(family_name)) +
+    ylab("log2FC") +
+    xlab("Timepoint") +
+    theme_minimal() +
+    theme(axis.text=element_text(size=14))+
+    #theme(legend.title = element_blank(), legend.position = "bottom")+  # move the legend to the bottom
+    theme(axis.title.x = element_blank())+
+    theme(legend.title = element_blank(), legend.position = "none")+  # remove the legend 
+    #guides(color = guide_legend(override.aes = list(shape = NA))) +  # to remove shapes from the legend
+    guides(color = guide_legend(ncol = 2), shape = guide_legend(ncol = 2))  # set the number of columns in the legend
+  })
+
+# Combine the plots into a single facet grid
+facet_grid <- do.call(gridExtra::grid.arrange, c(plots, ncol = 4))
+# Define the order of the subsets
+actual_order <- c("subset_Sphingobacteriaceae","subset_Chthoniobacteraceae", "subset_Pseudomonadaceae", "subset_Reyranellaceae")
+subset_order <- c("subset_Pseudomonadaceae","subset_Sphingobacteriaceae","subset_Chthoniobacteraceae", "subset_Reyranellaceae")
+
+
+# Assign names to the plots based on subset_order
+named_plots <- setNames(plots, actual_order)
+# Reorder the plots based on the defined o
+custom_ordered_plots <- named_plots[subset_order]
+
+# Combine the plots into a single facet grid
+facet_grid <- do.call(gridExtra::grid.arrange, c(custom_ordered_plots, ncol = 4))
+
+
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Ac_SC_DeSeq_ASV_trajectory_Muci_Sphingo_Chthonio_Reyra.svg")),
+  plot = facet_grid,
+  width = 32,
+  height = 9,
+  units = "cm",
+  dpi = 600
+)
+
+
+```
+
+
+
+```{r}
+
+```
+
+# Trajectories of individual ASVs
+```{r}
+# First filter the families based on the condition that each ASV_ID within a family should correspond to at least two different Collection_date values
+filtered_data <- DESeq2_results2[, .N, by = .(Family, ASV_ID)][N > 1, .(Family, ASV_ID)]
+filtered_data <- DESeq2_results2[ASV_ID %in% filtered_data$ASV_ID]
+# subsetting the data
+
+#create column ASV-Genus just for the plot legend
+filtered_data$ASV_Genus <- paste(DESeq2_results2$ASV_ID, DESeq2_results2$Genus, sep = " - ")
+
+# Splitting the data.table by 'Family' column
+subsets <- split(filtered_data, by = "Family")
+# Printing each subset and assigning them to separate variables
+for (family_name in names(subsets)) {
+  assign(paste0("subset_", family_name), subsets[[family_name]])
+  print(subsets[[family_name]])
+}
+
+```
+
+```{r}
+# Combine ASV_ID and Genus into a new variable for the legend
+plots <- lapply(names(subsets), function(family_name) {
+  ggplot(subsets[[family_name]], aes(x = Collection_date, y = log2FoldChange, color = ASV_ID)) +
+    #geom_point(size = 2) +
+    geom_point(aes(shape = Genus), size = 3) +
+    geom_line(position = position_dodge(width = 0.2), size = 1.5) +
+    scale_x_continuous(breaks = c(0, 5, 11, 20, 35)) +
+    labs(title = paste(family_name)) +
+    ylab("log2FC") +
+    xlab("Timepoint") +
+    theme_minimal() +
+    theme(legend.title = element_blank(), legend.position = "bottom")+  # move the legend to the bottom
+    #guides(color = guide_legend(override.aes = list(shape = NA))) +  # to remove shapes from the legend
+    guides(color = guide_legend(ncol = 2), shape = guide_legend(ncol = 1))  # set the number of columns in the legend
+  })
+
+
+# Combine the plots into a single facet grid
+facet_grid <- do.call(gridExtra::grid.arrange, c(plots, ncol = 4))
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_E25_v_Ac_DeSeq_ASV_trajectory.png")),
+  plot = facet_grid,
+  width = 48,
+  height = 65,
+  units = "cm",
+  dpi = 600
+)
+
+
+```
+
+
+```{r}
+
+```
+
+

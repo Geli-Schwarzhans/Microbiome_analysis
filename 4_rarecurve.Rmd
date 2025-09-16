@@ -1,0 +1,215 @@
+---
+title: "Ordinations using microViz"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(phyloseq)
+library(microViz)
+library(ggplot2)
+library("phyloseq")
+library("vegan")
+library("DESeq2")
+```
+# Load containers
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE.rds"))
+
+# Subsetting on the fly:
+#SE0 <- SE[, SE$collection_date %in% c("0")]
+#SE5 <- SE[, SE$collection_date %in% c("5")]
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+#SE20 <- SE[, SE$collection_date %in% c("20")]
+#SE35 <- SE[, SE$collection_date %in% c("35")]
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+#SEtest <- SE[, SE$collection_date %in% c("0", "5", "11", "20","35")]
+SEtest <- SE[, SE$collection_date %in% c("11")]
+SEtest <- SEtest[, SEtest$Species %in% c("UV7")]
+
+```
+#rarefy
+```{r}
+assay(SEtest, "rarefied") <-
+  SEtest %>%
+  assay("counts") %>%
+  t() %>%
+  vegan::rrarefy(sample = 5000) %>%
+  t()
+```
+# Load containers
+
+```{r}
+# We are loading SE_deep (!) here and converting it to phyloseq
+PS <-
+  SEtest  %>%#readRDS(file.path(RD_DIR, "SE_deep.rds")) %>%
+  makePhyloseqFromTreeSummarizedExperiment() %>%
+  tax_fix() %>%
+  phyloseq_validate(remove_undetected = TRUE)
+
+PS
+```
+
+
+
+```{r}
+otu_table <- t(otu_table(PS))
+class(otu_table) <- "matrix"
+# Calculate total number of reads per sample
+total_reads <- rowSums(otu_table)
+
+# Sort sample read counts in ascending order
+sorted_reads <- sort(total_reads)
+
+curve <- rarecurve(otu_table, step = 20, sample = sorted_reads, col = "blue", cex = 0.6, tidy = TRUE)
+ggplot(curve, aes(x = Sample, y = Species, group = Site))+
+  geom_line(data = curve, aes(x = Sample, y = Species))+
+  labs(x = "Reads", y = "ASVs")
+# Create the ggplot
+ggplot(rarefaction_df, aes(x = Sequences, y = ASVs)) +
+  geom_line(size = 2, color = "nice_colors") +
+  labs(x = "Reads", y = "ASVs") +
+  theme_minimal()
+```
+
+###### Rarefaction curve
+
+# over all of the PS object
+```{r}
+################################################### T0 ###################################################################
+
+# Extract OTU table from phyloseq object
+otu_table <- t(otu_table(PS))
+class(otu_table) <- "matrix"
+# Calculate total number of reads per sample
+total_reads <- rowSums(otu_table)
+
+# Sort sample read counts in ascending order
+sorted_reads <- sort(total_reads)
+
+rarecurve(otu_table, sample = sorted_reads, col="grey15", step = 1000, tidy = TRUE)
+
+#sorted_reads <- rep(1000, ncol(otu_table))
+#sorted_reads <- rep(100000, ncol(otu_table))
+# Remove any missing or infinite values
+#sorted_reads <- na.omit(sorted_reads)
+# Generate rarefaction curve
+curve0SC <- rarecurve(otu_table, sample = sorted_reads, col="grey15", step = 1000, tidy = TRUE)
+curve0Ac <- rarecurve(otu_table, sample = sorted_reads, col="steelblue3", step = 1000, tidy = TRUE)
+curve0E25 <- rarecurve(otu_table, sample = sorted_reads, col="orange2", step = 1000, tidy = TRUE)
+curve0UV7 <- rarecurve(otu_table, sample = sorted_reads, col="firebrick3", step = 1000, tidy = TRUE)
+
+# Plot rarefaction curve
+ggplot(curve, aes(x = Sample, y = Species, group = Site)) + 
+  geom_line(data = curve0SC, aes(x = Sample, y = Species, color = "35SC")) +
+  geom_line(data = curve0Ac, aes(x = Sample, y = Species, color = "35Ac")) +
+  geom_line(data = curve0E25, aes(x = Sample, y = Species, color = "35E25")) +
+  geom_line(data = curve0UV7, aes(x = Sample, y = Species, color = "35UV7")) +
+  scale_color_manual(values = c("35SC" = "grey15", "35Ac" = "steelblue3", "35E25" = "orange2", "35UV7" = "firebrick3")) +
+  labs(x = "Number of Reads", y = "Number of OTUs") + 
+  theme_minimal()
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rarefaction_0.svg")), width = 10, height = 8, limitsize = FALSE)
+
+################################################### T5 ###################################################################
+otu_table <- t(otu_table(PS))
+class(otu_table) <- "matrix"
+# Calculate total number of reads per sample
+total_reads <- rowSums(otu_table)
+
+# Sort sample read counts in ascending order
+sorted_reads <- sort(total_reads)
+
+curve5SC <- rarecurve(otu_table, sample = sorted_reads, col="grey15", step = 1000, tidy = TRUE)
+curve5Ac <- rarecurve(otu_table, sample = sorted_reads, col="steelblue3", step = 1000, tidy = TRUE)
+curve5E25 <- rarecurve(otu_table, sample = sorted_reads, col="orange2", step = 1000, tidy = TRUE)
+curve5UV7 <- rarecurve(otu_table, sample = sorted_reads, col="firebrick3", step = 1000, tidy = TRUE)
+
+# Plot rarefaction curve
+ggplot(curve, aes(x = Sample, y = Species, group = Site)) + 
+  geom_line(data = curve5SC, aes(x = Sample, y = Species, color = "35SC")) +
+  geom_line(data = curve5Ac, aes(x = Sample, y = Species, color = "35Ac")) +
+  geom_line(data = curve5E25, aes(x = Sample, y = Species, color = "35E25")) +
+  geom_line(data = curve5UV7, aes(x = Sample, y = Species, color = "35UV7")) +
+  scale_color_manual(values = c("35SC" = "grey15", "35Ac" = "steelblue3", "35E25" = "orange2", "35UV7" = "firebrick3")) +
+  labs(x = "Number of Reads", y = "Number of OTUs") + 
+  theme_minimal()
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rarefaction__5.pdf")), width = 10, height = 8, limitsize = FALSE)
+
+################################################### T11 ###################################################################
+otu_table <- t(otu_table(PS))
+class(otu_table) <- "matrix"
+# Calculate total number of reads per sample
+total_reads <- rowSums(otu_table)
+curve11SC <- rarecurve(otu_table, sample = sorted_reads, col="grey15", step = 1000, tidy = TRUE)
+curve11Ac <- rarecurve(otu_table, sample = sorted_reads, col="steelblue3", step = 1000, tidy = TRUE)
+curve11E25 <- rarecurve(otu_table, sample = sorted_reads, col="orange2", step = 1000, tidy = TRUE)
+curve11UV7 <- rarecurve(otu_table, sample = sorted_reads, col="firebrick3", step = 1000, tidy = TRUE)
+
+# Plot rarefaction curve
+ggplot(curve, aes(x = Sample, y = Species, group = Site)) + 
+  geom_line(data = curve11SC, aes(x = Sample, y = Species, color = "35SC")) +
+  geom_line(data = curve11Ac, aes(x = Sample, y = Species, color = "35Ac")) +
+  geom_line(data = curve11E25, aes(x = Sample, y = Species, color = "35E25")) +
+  geom_line(data = curve11UV7, aes(x = Sample, y = Species, color = "35UV7")) +
+  scale_color_manual(values = c("35SC" = "grey15", "35Ac" = "steelblue3", "35E25" = "orange2", "35UV7" = "firebrick3")) +
+  labs(x = "Number of Reads", y = "Number of OTUs") + 
+  theme_minimal()
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rarefaction_11.pdf")), width = 10, height = 8, limitsize = FALSE)
+
+################################################### T20 ###################################################################
+otu_table <- t(otu_table(PS))
+class(otu_table) <- "matrix"
+# Calculate total number of reads per sample
+total_reads <- rowSums(otu_table)
+curve20SC <- rarecurve(otu_table, sample = sorted_reads, col="grey15", step = 1000, tidy = TRUE)
+curve20Ac <- rarecurve(otu_table, sample = sorted_reads, col="steelblue3", step = 1000, tidy = TRUE)
+curve20E25 <- rarecurve(otu_table, sample = sorted_reads, col="orange2", step = 1000, tidy = TRUE)
+curve20UV7 <- rarecurve(otu_table, sample = sorted_reads, col="firebrick3", step = 1000, tidy = TRUE)
+
+# Plot rarefaction curve
+ggplot(curve, aes(x = Sample, y = Species, group = Site)) + 
+  geom_line(data = curve20SC, aes(x = Sample, y = Species, color = "35SC")) +
+  geom_line(data = curve20Ac, aes(x = Sample, y = Species, color = "35Ac")) +
+  geom_line(data = curve20E25, aes(x = Sample, y = Species, color = "35E25")) +
+  geom_line(data = curve20UV7, aes(x = Sample, y = Species, color = "35UV7")) +
+  scale_color_manual(values = c("35SC" = "grey15", "35Ac" = "steelblue3", "35E25" = "orange2", "35UV7" = "firebrick3")) +
+  labs(x = "Number of Reads", y = "Number of OTUs") + 
+  theme_minimal()
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rarefaction_20.pdf")), width = 10, height = 8, limitsize = FALSE)
+
+################################################### T35 ###################################################################
+otu_table <- t(otu_table(PS))
+class(otu_table) <- "matrix"
+# Calculate total number of reads per sample
+total_reads <- rowSums(otu_table)
+curve35SC <- rarecurve(otu_table, sample = sorted_reads, col="grey15", step = 1000, tidy = TRUE)
+curve35Ac <- rarecurve(otu_table, sample = sorted_reads, col="steelblue3", step = 1000, tidy = TRUE)
+curve35E25 <- rarecurve(otu_table, sample = sorted_reads, col="orange2", step = 1000, tidy = TRUE)
+curve35UV7 <- rarecurve(otu_table, sample = sorted_reads, col="firebrick3", step = 1000, tidy = TRUE)
+
+# Plot rarefaction curve
+ggplot(curve, aes(x = Sample, y = Species, group = Site)) + 
+  geom_line(data = curve35SC, aes(x = Sample, y = Species, color = "35SC")) +
+  geom_line(data = curve35Ac, aes(x = Sample, y = Species, color = "35Ac")) +
+  geom_line(data = curve35E25, aes(x = Sample, y = Species, color = "35E25")) +
+  geom_line(data = curve35UV7, aes(x = Sample, y = Species, color = "35UV7")) +
+  scale_color_manual(values = c("35SC" = "grey15", "35Ac" = "steelblue3", "35E25" = "orange2", "35UV7" = "firebrick3")) +
+  labs(x = "Number of Reads", y = "Number of OTUs") + 
+  theme_minimal()
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_rarefaction_35.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+

@@ -1,0 +1,132 @@
+---
+title: "miaViz demo"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+
+A complete list of miaViz functions can be found at https://microbiome.github.io/miaViz/reference/.
+
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(miaViz)
+```
+
+
+# Load containers
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE.rds"))
+```
+
+```{r}
+SE_raw <- readRDS(file.path(RD_DIR, "SE_raw.rds"))
+```
+
+
+# plotColTile
+
+Visualize number of samples/libraries in groupings.
+
+```{r}
+SE$collection_date <- as.character(SE$collection_date) 
+plotColTile(SE, "Species", "collection_date")
+```
+
+```{r}
+SE_raw$collection_date <- as.character(SE_raw$collection_date) 
+plotColTile(SE_raw, "Species", "collection_date")
+```
+
+
+# plotAbundanceDensity
+
+```{r}
+plotAbundanceDensity(
+  object = SE,
+  # or:
+  # object = SE %>% altExp("Genus"),
+  # set top taxa to show:
+  # n = 10,
+  abund_values = "relabundance",
+  colour_by = "Group"
+  # ) + scale_x_log10(
+)
+```
+
+
+# plotAbundance
+
+```{r}
+SE$Group <- factor(SE$Group, levels =c("0-SC", "5-SC", "11-SC", "20-SC", "35-SC", "0-Ac", "5-Ac", "11-Ac", "20-Ac", "35-Ac", "0-E25", "5-E25", "11-E25",  "20-E25", "35-E25", "0-UV7", "5-UV7", "11-UV7", "20-UV7", "35-UV7"))
+
+plotAbundance(
+  x = SE,
+  rank = "Phylum"#,
+  #features = "Group"
+)
+#ggsave(file="test.svg", plot=image, width=15, height=12)
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_relAbundance_plot.svg")), device = "svg", width = 16, height = 12, limitsize = FALSE)
+
+```
+
+```{r}
+plotAbundance(
+  x = SE,
+  rank = "Phylum",
+  order_sample_by = "Crenarchaeota"
+)
+```
+
+See also https://microbiome.github.io/miaViz/reference/plotAbundance.html for more (complex) examples.
+
+
+# plotPrevalence
+
+```{r}
+plotPrevalence(
+  x = SE,
+  rank = "Phylum"
+) + scale_x_log10()
+```
+
+
+# plotTaxaPrevalence
+
+```{r}
+plotTaxaPrevalence(
+  x = SE,
+  rank = "Phylum"
+)
+```
+
+
+
+# plotPrevalentAbundance
+
+```{r}
+plotPrevalentAbundance(
+  x = SE,
+  rank = "Family",
+  colour_by = "Phylum"
+) + scale_x_log10()
+```
+
+
+# plotSeries
+
+see https://microbiome.github.io/miaViz/reference/plotSeries.html
+
+
+# plotTree
+
+see https://microbiome.github.io/miaViz/reference/plotTree.html

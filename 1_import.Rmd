@@ -1,0 +1,310 @@
+---
+title: "Import"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+source(file.path("helpers", "write_flattened.R"), chdir = TRUE)
+library(ANCOMBC)
+library(phyloseq)
+library(phytools)
+```
+
+```{r}
+cat(
+  crayon::blue(crayon::bold("Setup:")), "\n",
+  crayon::blue("PROJECT_NAME: "), PROJECT_NAME, "\n",
+  crayon::blue("METADATA_DIR: "), METADATA_DIR, "\n",
+  crayon::blue("DATA_DIR: "), DATA_DIR, "\n",
+  crayon::blue("RD_DIR: "), RD_DIR, "\n",
+  crayon::blue("RESULTS_DIR: "), RESULTS_DIR, "\n",
+  crayon::blue("PLOTS_DIR: "), PLOTS_DIR, "\n",
+  sep = ""
+)
+```
+
+
+# Introduction
+
+* columns are always **samples**/libraries ("independent variable")
+* rows are always **features**, i.e., ASVs ("dependent variable")
+
+
+# Import data
+
+Read in all relevant data from the JMF amplicon sequencing pipeline.
+
+
+## Abundance data: counts
+
+Abundance data:
+
+```{r}
+Counts <- fread(file.path(DATA_DIR, "DADA2_counts.tsv"), stringsAsFactors = TRUE)
+if (interactive()) head(Counts) # interactive(): this will only be shown when when interacting with the script directly, never when knitting
+```
+
+```{r}
+Counts_matrix <- Matrix::sparseMatrix(
+  i = Counts$Sequence_ID %>% as.integer(),
+  j = Counts$Library_ID %>% as.integer(),
+  x = Counts$Count,
+  dimnames = list(
+    Counts$Sequence_ID %>% levels(),
+    Counts$Library_ID %>% levels()
+  )
+)
+
+# inspect result as a sanity check:
+if (interactive()) Counts_matrix %>% head(c(10, 6))
+```
+
+However, the sparseMatrix object is underused, so some tools may crash when using it. You can downgrade a sparseMatrix to a base matrix like this:
+
+```{r}
+ Counts_matrix <- as.matrix(Counts_matrix)
+```
+
+
+## Row data: taxonomy
+
+```{r}
+Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rRNA_SSU.SILVA_classified.csv"))
+
+# or use one of the alternative classification that may be available for your project:
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rRNA_SSU.SILVA_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rRNA_SSU.RDP_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rRNA_SSU.PR2_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rRNA_SSU.custom_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rRNA_ITS.UNITE_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.amoA.custom_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.nifH.moyn413_reference.DADA2_classified.tsv"))
+# Row_data <- fread(file.path(DATA_DIR, "DADA2_ASVs.rbcL.custom_reference.DADA2_classified.tsv"))
+```
+
+Rename the feature identifier column:
+
+```{r}
+if ("name" %in% names(Row_data)) {
+  setnames(Row_data, "name", "Sequence_ID")
+}
+setnames(Row_data, "Sequence_ID", "ASV_ID")
+```
+
+Parse the SILVA taxonomy from the "lca_tax_slv" column. If you are using the taxonomic information from the DADA2 classifier, the if condition will skip this step.
+
+```{r}
+if ("lca_tax_slv" %in% names(Row_data)) {
+  taxonomic_ranks <- c("Domain", "Phylum", "Class", "Order", "Family", "Genus")
+  Row_data[, (taxonomic_ranks) := tstrsplit(lca_tax_slv, ";", keep = 1:6)]
+
+  taxonomic_ranks <- c(taxonomic_ranks, "ASV_ID")
+  Row_data <- Row_data[, ..taxonomic_ranks]
+}
+```
+
+Cleaning up the taxonomy data makes the tip of the lineage unique, which avoid breaking some functions.
+
+```{r}
+#for(rank in rev(names(Row_data))) {
+#  Row_data[get(rank) == "uncultured", (rank) := NA]
+#}
+```
+
+```{r}
+if (interactive()) head(Row_data)
+```
+
+
+## Column data: library/sample metadata
+
+Metadata about the sequencing libraries, i.e., the FASTQ files that will be uploaded to NCBI SRA, and samples ("BioSamples").
+
+```{r}
+Column_data <- merge(
+  fread(file.path(METADATA_DIR, "Libraries.tsv")),
+  fread(file.path(METADATA_DIR, "Samples.tsv"))
+)
+```
+
+Categorical metadata is imported as type "character", but some should be type "factor". This is PROJECT-SPECIFIC!
+
+```{r}
+Column_data[, Group := Group %>% as.factor()]
+
+# in case of metadata fields which include non-padded numbers, mixedsort() can be used like this:
+# Column_data[, Metadata_field := Metadata_field %>% factor(Metadata_field %>% unique() %>% gtools::mixedsort())]
+```
+
+The sample/library metadata can contain more samples/libraries than are in the count data as some samples can have zero yield.
+
+Subset the metadata to the the counts:
+
+```{r}
+Column_dframe <- S4Vectors::DataFrame(Column_data[JMF_library_ID %in% levels(Counts$Library_ID)])
+```
+
+```{r}
+if (interactive()) head(Column_dframe)
+```
+
+## Row tree: phylogeny
+
+Import tree as R object:
+
+```{r}
+#tree_file <- file.path(DATA_DIR, "DADA2_ASVs_Fasttree.tre")
+
+#if (file.exists(tree_file)) {
+#  Tree <- ape::read.tree(tree_file)
+#  Tree_rooted <- root(Tree, "ASV_j1r_036", resolve.root=T) # root tree at one of the ASVs that is in the outgroup when adding all ASVs to the chlamydial tree with #epa-ng
+#  Row_tree <- ape::multi2di(Tree_rooted) # tree needs to have bifurcations only for unifrac
+#  Row_tree
+#} else {
+#  message("Tree file not found.")
+#}
+```
+
+
+## Reference sequences
+
+Import the ASV sequences as a DNAString object.
+
+```{r}
+Row_sequences <- Biostrings::readDNAStringSet(file.path(DATA_DIR, "DADA2_ASVs.fna"))
+
+# set sequence names to the only the ID
+names(Row_sequences) <- names(Row_sequences) %>% str_remove(" .+")
+```
+
+
+# The data container
+
+## sanity checks
+
+Make sure all the data fits together.
+
+```{r}
+# Identical names and order of ASVs in counts and taxonomy data
+stopifnot(identical(
+  rownames(Counts_matrix),
+  Row_data$ASV_ID
+))
+```
+
+```{r}
+# Identical names and order of libraries in counts and metadata
+stopifnot(identical(
+  colnames(Counts_matrix),
+  Column_dframe$JMF_library_ID
+))
+```
+
+```{r}
+# Identical names of ASVs in taxonomy data and phylogentic tree
+if (exists("Row_tree")) {
+  stopifnot(identical(
+    Row_data$ASV_ID,
+    Row_tree$tip.label %>% sort()
+  ))
+}
+```
+
+```{r}
+# Identical names of ASVs in taxonomy data and reference sequences
+stopifnot(identical(
+  Row_data$ASV_ID,
+  names(Row_sequences)
+))
+```
+
+
+## create container
+
+Create the TreeSummarizedExperiment data container object.
+
+```{r}
+SE <- TreeSummarizedExperiment::TreeSummarizedExperiment(
+  assays = list(counts = Counts_matrix),
+  rowData = Row_data,
+  colData = Column_dframe,
+  rowTree = if (exists("Row_tree")) Row_tree,
+  referenceSeq = Row_sequences
+)
+```
+
+Print TreeSummarizedExperiment object.
+
+```{r}
+SE
+```
+
+
+## save container
+
+Export TreeSummarizedExperiment object as R data file.
+
+```{r}
+saveRDS(SE, file.path(RD_DIR, "SE_raw.rds"))
+```
+
+```{r}
+SE %>% write_flattened(file.path(RESULTS_DIR, "Flattened_SE_raw.tsv"))
+```
+
+
+## validate container
+
+```{r}
+stopifnot(isTRUE(mia::checkTaxonomy(SE)))
+```
+
+```{r}
+Molten_SE <- mia::meltAssay(SE, add_row_data = TRUE, add_col_data = TRUE)
+Sparse_molten_SE <- subset(Molten_SE, counts > 0)
+```
+
+```{r}
+stopifnot(identical(
+  Counts$Sequence_ID,
+  Sparse_molten_SE$FeatureID
+))
+
+stopifnot(identical(
+  as.character(Counts$Sequence_ID),
+  Sparse_molten_SE$ASV_ID
+))
+```
+
+```{r}
+stopifnot(identical(
+  Counts$Library_ID,
+  Sparse_molten_SE$SampleID
+))
+
+stopifnot(identical(
+  as.character(Counts$Library_ID),
+  Sparse_molten_SE$JMF_library_ID
+))
+```
+
+```{r}
+stopifnot(identical(
+  Counts$Count,
+  as.integer(Sparse_molten_SE$counts)
+))
+```

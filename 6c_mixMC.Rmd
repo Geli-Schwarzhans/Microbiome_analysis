@@ -1,0 +1,248 @@
+---
+title: "mixMC"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output: 
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+
+
+* http://mixomics.org/mixmc-methodology/
+
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+```
+
+```{r}
+FOLDS <- 5
+# reduced to 3 because of small sample sizes, if possible keep it at a higher number:
+FOLDS <- 3
+
+if (interactive()) {
+  # speed things up while writing the script
+  NREPEAT <- 10
+} else {
+  NREPEAT <- 100
+}
+NREPEAT
+```
+
+
+# Load data
+
+```{r}
+SE <-
+  readRDS(file.path(RD_DIR, "SE_only_grassland_mulched_A_T.rds")) %>%
+  altExp("top")
+```
+
+
+# Prepare data for analyses
+
+Export count matrix:
+
+```{r}
+Count_matrix <-
+  SE %>%
+  assay() %>%
+  t() # vegan-style matrix needed!
+
+str(Count_matrix)
+```
+
+Get variable
+
+```{r}
+Y <- SE$Group # change this when appropriate
+# or define groups on the fly:
+# Y <- str_c(SE$Soil_type, " ", SE$Location)
+
+if (!is.factor(Y)) {
+  message("Converting Y to factor")
+  Y <- as.factor(Y)
+}
+
+Y <- Y %>% droplevels()
+
+Y
+```
+
+
+# Pre-processing
+
+* http://mixomics.org/mixmc-methodology/mixmc-preprocessing/
+
+pre-filtering was already done in 2_preprocess.Rmd and by using `altExp("top")`
+
+```{r}
+data <- Count_matrix + 1
+```
+
+```{r}
+dim(data)
+data %>% head(c(5, 5))
+```
+
+```{r}
+barplot(rowSums(data))
+```
+
+```{r}
+stopifnot(all(data > 0))
+```
+
+
+
+# unsupervised analysis
+
+* http://mixomics.org/mixmc-methodology/koren-bodysites-case-study/
+
+This is unsupervised, therefore Y is only used for visualization!
+
+## PCA
+
+```{r}
+pca_result <- mixOmics::pca(data, ncomp = NULL, logratio = "CLR")
+plot(pca_result)
+```
+
+```{r}
+mixOmics::plotIndiv(pca_result, group = Y, legend = TRUE, ellipse = TRUE, ind.names = FALSE, title = "PCA")
+```
+
+**CHOICE: number of components to use:**
+
+```{r}
+COMPONENTS <- 2
+```
+
+
+# supervised analysis
+
+* http://mixomics.org/mixmc/case-study-koren-diverse-bodysites/
+
+## PLS-DA
+
+```{r}
+plsda_results <- mixOmics::plsda(data, Y, ncomp = COMPONENTS + 1, logratio = "CLR")
+
+mixOmics::plotIndiv(plsda_results, group = Y, legend = TRUE, ellipse = TRUE, ind.names = FALSE, title = "PLS-DA")
+```
+
+
+## evaluating PLS-DA
+
+* »The BER stands for Balanced Error Rate and should be considered when there is an unbalanced number of samples per group.« (http://mixomics.org/mixmc/case-study-koren-diverse-bodysites/)
+
+```{r}
+plsda_perf_results <- mixOmics::perf(
+  plsda_results,
+  auc = TRUE,
+  folds = FOLDS, nrepeat = NREPEAT, progressBar = interactive()
+)
+
+plot(plsda_perf_results, overlay = "measure")
+```
+
+```{r}
+plsda_perf_results
+plsda_perf_results$error.rate
+```
+
+**CHOICE: distance to use:**
+
+```{r}
+DIST <- "centroids.dist"
+```
+
+
+## tuning sPLS-DA
+
+```{r}
+test_keepX <- seq(10, 300, 10)
+test_keepX
+```
+
+```{r tune.splsda}
+tune_splsda_results <- mixOmics::tune.splsda(
+  data, Y,
+  ncomp = COMPONENTS + 1, logratio = "CLR", dist = DIST, test.keepX = test_keepX,
+  folds = FOLDS, nrepeat = NREPEAT, progressBar = interactive()
+)
+
+plot(tune_splsda_results) + expand_limits(y = 0)
+```
+
+```{r}
+tune_splsda_results$error.rate
+```
+
+```{r}
+tune_splsda_results$choice.keepX
+select_keepX <- tune_splsda_results$choice.keepX[seq(COMPONENTS)]
+select_keepX
+```
+
+
+## sPLS-DA
+
+```{r}
+splsda_results <- mixOmics::splsda(data, Y, ncomp = max(2, COMPONENTS), logratio = "CLR", keepX = select_keepX)
+
+mixOmics::plotIndiv(splsda_results, group = Y, legend = TRUE, ellipse = TRUE, ind.names = FALSE, title = "sPLS-DA")
+```
+
+
+## evaluating sPLS-DA
+
+```{r}
+splsda_perf_results <- mixOmics::perf(
+  splsda_results,
+  auc = TRUE, dist = DIST,
+  folds = FOLDS, nrepeat = NREPEAT, progressBar = interactive()
+)
+
+plot(splsda_perf_results)
+```
+
+```{r}
+splsda_perf_results$error.rate
+```
+
+**Everything looks good.**
+
+
+## selection of discriminative ASVs
+
+```{r fig.height=10}
+for (COMP in seq(COMPONENTS)) {
+  # loading (contribution) per ASV (“the importance of the ASV in the microbial signature”):
+  Discriminative_ASVs <- mixOmics::selectVar(splsda_results, comp = COMP)$value %>% as.data.table(keep.rownames = "Feature_ID")
+  Discriminative_ASVs %>% setnames("value.var", "Loading")
+  Discriminative_ASVs[, Stability := splsda_perf_results$features$stable[[COMP]][Feature_ID]]
+  Discriminative_ASVs[, Component := COMP]
+  Discriminative_ASVs %>% print(nrows = Inf)
+  Discriminative_ASVs %>% setorder(Feature_ID)
+  Discriminative_ASVs %>% write_tsv(file.path(RESULTS_DIR, g("mixMC.discriminative_ASVs.component_{COMP}.tsv")))
+
+  mixOmics::plotLoadings(splsda_results, comp = COMP, contrib = "max")
+}
+```
+
+```{r fig.width=30,fig.height=10}
+mixOmics::cim(
+  splsda_results,
+  row.sideColors = mixOmics::color.mixo(Y),
+  clust.method = c("ward", "ward"),
+  margins = c(5, 9),
+  legend = list(
+    legend = Y %>% levels(),
+    col = Y %>% levels() %>% factor(Y %>% levels()) %>% mixOmics::color.mixo()
+  )
+)
+```

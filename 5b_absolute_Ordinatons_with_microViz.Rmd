@@ -1,0 +1,137 @@
+---
+title: "Ordinations using microViz"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(phyloseq)
+library(microViz)
+library(ggplot2)
+library(dplyr)
+library("phyloseq")
+library("vegan")
+#library("DESeq2")
+```
+# Load containers
+
+```{r}
+# !!! we are loading SE_deep here, but saving it to the SE variable !!!
+SE <- readRDS(file.path(RD_DIR, "SE_deep.rds"))
+
+# Subsetting on the fly:
+#SE0 <- SE[, SE$collection_date %in% c("0")]
+#SE5 <- SE[, SE$collection_date %in% c("5")]
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+#SE20 <- SE[, SE$collection_date %in% c("20")]
+#SE35 <- SE[, SE$collection_date %in% c("35")]
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+SEtest <- SE[, SE$collection_date %in% c("0", "5", "11", "20","35")]
+#SEtest <- SE[, SE$collection_date %in% c("20")]
+#SEtest <- SEtest[, SEtest$Species %in% c("UV7")]
+
+```
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+```
+
+# Load containers
+
+```{r}
+# We are loading SE_deep (!) here and converting it to phyloseq
+PS_rel <-
+  SEtest  %>%#readRDS(file.path(RD_DIR, "SE_deep.rds")) %>%
+  makePhyloseqFromTreeSummarizedExperiment() %>%
+  tax_fix() %>%
+  phyloseq_validate(remove_undetected = TRUE)
+
+PS_abs <- readRDS(file.path(RD_DIR, "PS_abs.rds"))
+PS_abs
+
+PS_abstest <- subset_samples(PS_abs, sample_data(PS_abs)$collection_date %in% c("11"))
+#PS_abstest <- subset_samples(PS_abstest, sample_data(PS_abstest)$Species %in% c("UV7"))
+
+```
+
+```{r}
+# transfomation, using clr (Negative values can occur because the CLR transformation is relative, meaning that it is based on ratios between features. If a feature has a lower abundance than the geometric mean of all the other features, its CLR value will be negative.)
+#PS_clr <- PS %>% tax_transform("clr")
+#otu_table(PS_clr)
+
+# transformation using total sum scaling (Total Sum Scaling (TSS) involves dividing the read counts for each sample by the total number of reads in that sample. This method scales the data to have a total count of 1 for each sample, which can be interpreted as proportions or relative abundances.)
+PS_rel <- transform_sample_counts(PS_rel, function(x) x/sum(x))
+#PS <- transform_sample_counts(PS, function(x) x / sum(x))
+#PS_TSS = PS %>% tax_glom(taxrank = "Family") %>% transform_sample_counts(function(x) {x/sum(x)})# %>% psmelt() %>% arrange(Family)
+
+otu_table(PS_rel)
+```
+
+##  Ordinations: Add pseudocount
+```{r}
+
+PS_abs_filtered_transf4ordination <- PS_abstest
+new_mat <- otu_table(PS_abs_filtered_transf4ordination) %>% as.data.frame()
+new_mat <- new_mat + 1 # add 1
+# Replace NA values with 1
+new_mat <- replace(new_mat, is.na(new_mat), 1)
+lognew_mat <- log(new_mat) %>% as.matrix() # log transform
+
+mode(lognew_mat) <- "integer" # we want integers because 0.5 gene copies don't exist
+
+lognew_mat <- as.data.frame(lognew_mat)
+
+otu_table(PS_abs_filtered_transf4ordination) <- otu_table(lognew_mat, taxa_are_rows = T)
+
+
+
+
+sample_data(PS_abs_filtered_transf4ordination)$Species <- factor(sample_data(PS_abs_filtered_transf4ordination)$Species,levels = c("SC", "Ac", "E25", "UV7"))
+```
+
+```{r}
+PS_abs_filtered_transf4ordination %>%
+  tax_transform("identity") %>%
+  ord_calc("PCA") %>%
+  ord_plot(colour = "Species", shape = "Species")
+```
+
+```{r}
+last_plot() + stat_chull(aes(colour = Species))
+# or:
+# last_plot() + stat_ellipse(aes(colour = Species))
+```
+
+```{r}
+PS_abs_filtered_transf4ordination %>% 
+  tax_transform("identity") %>%
+  dist_calc("bray") %>% 
+  ord_calc("PCoA") %>% 
+  ord_plot(colour = "Species", shape = "Species")#+
+  
+ 
+#scale_colour_brewer(values = c("steelblue3","orange2","grey15", "firebrick3"))
+last_plot() + stat_ellipse(aes(colour = Species)) +scale_color_manual(values= c("grey15","steelblue3", "orange2","firebrick3"))
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_abs_beta_div_T35.png")), width = 10, height = 10, limitsize = FALSE)
+```
+User_sample_ID
+
+# Interactive
+
+See https://david-barnett.github.io/microViz/articles/web-only/ordination-interactive.html.
+
+```{r}
+if (interactive()) ord_explore(PS_abs_filtered_transf4ordination)
+```

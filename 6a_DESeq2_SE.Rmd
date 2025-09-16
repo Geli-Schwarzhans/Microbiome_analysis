@@ -1,0 +1,150 @@
+---
+title: "DESeq2"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+
+* https://www.bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
+* https://www.bioconductor.org/packages/release/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html
+* https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4878611/ <- DESeq2 works with only 3 replicates if log2FC threshold of 0.5 (see Table 2)
+
+Benchmarking:
+
+* https://link.springer.com/article/10.1186/s40168-016-0208-8 »we recommend researchers choose tools for detecting DA that exhibit low false positive rates, that have good retrieval power across effect sizes and case/control proportions, and that are not biased for these parameters at differing levels of (high) sparsity: metagenomeSeq feature model and the basic permutation test both fulfill these criteria for large and small datasets, and edgeR for small datasets.«
+* https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-02104-1 <- »our analyses suggested that limma-voom, corncob, and DESeq2 showed the most consistent performance across all datasets«
+* https://www.nature.com/articles/s41467-022-28034-z: »One goal of our work was to validate the recommendations of another recent DA method evaluation paper, which found that limma voom, corncob, and DESeq2 performed best overall of the tools they tested.  Based on our results, we do not recommend these tools as the sole methods used for data analysis, and instead would suggest that researchers use more conservative methods such as ALDEx2 and ANCOM-II.«
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(DESeq2)
+```
+
+
+# Load data
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_abs.rds")) #%>%
+  #altExp("top")
+```
+
+
+
+
+```{r}
+# DESeq2 likes the metadata to be alpha-numeric factors only (optional!)
+SE$Species <-
+  SE$Species %>%
+  str_replace_all("[^a-zA-Z0-9]+", "_") %>%
+  as.factor()
+```
+
+
+# replace NAs in counts with 0s
+```{r}
+counts(SE)[is.na(counts(SE))] <- 0
+counts(SE)
+# decimal numbers cannot be used by DESeq, so you have to round numbers
+counts(SE) <- round(counts(SE))
+
+#check if counts values are numeric
+count_matrix <- t(counts(SE))
+class(count_matrix[1, 1]) 
+```
+
+
+#Subset the data
+```{r}
+# let's remind ourselves which assay we have available to us
+assayNames(SE)
+# make custom order of the Samples
+SE$Species <- factor(SE$Species, levels =c("SC","Ac", "E25","UV7"))
+SE$collection_date <- factor(SE$collection_date, levels =c("0","5", "11","20","35"))
+#SE11 <- SE
+#SE11$Species <- factor(SE11$Species, levels =c("SC","Ac", "E25","UV7"))
+SEtest <- SE[, SE$collection_date %in% c("11")]
+SEtest <- SEtest[, SEtest$Species %in% c("SC","UV7")]
+
+SEtest$Species <- factor(SEtest$Species, levels =c("SC","UV7"))
+SEtest$collection_date <- factor(SEtest$collection_date, levels =c("11"))
+
+tcount_matrix <- t(counts(SEtest))
+count_matrix <- counts(SEtest)
+dim(count_matrix)
+anyNA(count_matrix)
+```
+
+# rows that sum to 0 are removed
+```{r}
+# Calculate the row sums
+row_sums <- rowSums(count_matrix)
+
+# Identify the rows (ASVs) with a sum of 0
+rows_to_remove <- which(row_sums == 0)
+
+# Remove rows with a sum of 0 from the count matrix
+count_matrix_filtered <- count_matrix[-rows_to_remove, ]
+```
+
+# inspect you data 
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+```
+# DESeq2
+
+```{r}
+dds <- DESeqDataSet(SEtest, design = ~ Species)
+
+deseq <- DESeqDataSetFromMatrix(
+  # Adding a count of 1 is optional. There are alternative ways to deal with too many zeros too: https://github.com/joey711/phyloseq/issues/387
+  countData = count_matrix_filtered,
+  colData = colData(SEtest),
+  design = ~Species
+)
+deseq
+```
+
+```{r}
+deseq <- DESeq(deseq)
+deseq
+```
+
+```{r}
+plotDispEsts(deseq)
+```
+
+```{r}
+# Always set alpha paramter here!
+deseq_results <- results(deseq, lfcThreshold = 0.5, alpha = 0.05)
+mcols(deseq_results, use.names = TRUE)
+summary(deseq_results)
+deseq_results
+```
+
+```{r}
+plotMA(deseq_results)
+```
+
+```{r}
+deseq_results_dt <- deseq_results %>% as.data.table("Feature_ID")
+```
+
+```{r}
+deseq_results_dt %>% write_tsv(file.path(RESULTS_DIR, g("DESeq2_results.tsv")))
+```
+
+```{r}
+significant_deseq_results <- deseq_results_dt[padj <= 0.05]
+significant_deseq_results[order(-abs(log2FoldChange))]
+```

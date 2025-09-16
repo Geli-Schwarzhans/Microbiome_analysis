@@ -1,0 +1,1136 @@
+---
+title: "pheatmap demo"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#rmove all data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(pheatmap)
+library(gplots)
+```
+
+
+# Load containers
+```{r}
+SE_abs <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+
+SE <- SE_abs[, SE_abs$collection_date %in% c("0","5", "11","20", "35")]
+#SE <- SE_abs[, SE_abs$Species %in% c("Ac", "UV7")]
+
+
+# Get the 'Family' column from the rowData of 'SE'
+family_column <- rowData(SE)$Family
+domain_column <- rowData(SE)$Domain
+# Extract unique names listed under 'Family'
+unique_family_names <- unique(family_column)
+
+# Print the unique family names
+print(unique_family_names)
+```
+
+```{r}
+# let's remind ourselves which assay we have available to us
+assayNames(SE)
+# make custom order of the Samples
+SE$collection_date <- factor(SE$collection_date, levels =c("0","5", "11","20", "35"))
+```
+
+```{r}
+#file1 <- file.path(DiffAbund_DIR, "SC_Ac_DESeq2_results_in_a_loop.tsv")
+#DESeq2_results1 <- fread(file1)
+file2 <- file.path(DiffAbund_DIR, "SC_E25_DESeq2_results_in_a_loop.tsv")
+DESeq2_results1 <- fread(file2)
+file3 <- file.path(DiffAbund_DIR, "SC_UV7_DESeq2_results_in_a_loop.tsv")
+DESeq2_results2 <- fread(file3)
+
+#file1 <- file.path(DiffAbund_DIR, "Ac_E25_DESeq2_results_in_a_loop.tsv")
+#DESeq2_results1 <- fread(file1)
+file2 <- file.path(DiffAbund_DIR, "Ac_UV7_DESeq2_results_in_a_loop.tsv")
+DESeq2_results2 <- fread(file2)
+
+```
+
+# combine files at each timepoint
+```{r}
+############################################# T0 ################################################################
+
+# Filter rows where Collection_date is 0
+dt_filtered1_0 <- DESeq2_results1[Collection_date == 0]
+dt_filtered2_0 <- DESeq2_results2[Collection_date == 0]
+#dt_filtered3_0 <- DESeq2_results3[Collection_date == 0]
+
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2")
+
+dt_filtered1_0 <- na.omit(dt_filtered1_0[, ..columns_to_keep, with = FALSE])
+dt_filtered2_0 <- na.omit(dt_filtered2_0[, ..columns_to_keep, with = FALSE])
+#dt_filtered3_0 <- na.omit(dt_filtered3_0[, ..columns_to_keep, with = FALSE])
+
+# Combine data.tables by row
+#combined_dt_0 <- rbindlist(list(dt_filtered1_0, dt_filtered2_0, dt_filtered3_0), fill = TRUE)
+combined_dt_0 <- rbindlist(list(dt_filtered1_0, dt_filtered2_0), fill = TRUE)
+
+filtered_data_0 <- subset(combined_dt_0, padj < 0.05)
+
+# Merge rows based on the Feature_ID column
+newcombined_dt_0 <- combined_dt_0[, lapply(.SD, function(x) if(all(is.na(x))) NA else x), by = Feature_ID]
+
+############################################# T5 ################################################################
+# Filter rows where Collection_date is 0
+dt_filtered1_5 <- DESeq2_results1[Collection_date == 5]
+dt_filtered2_5 <- DESeq2_results2[Collection_date == 5]
+#dt_filtered3_5 <- DESeq2_results3[Collection_date == 5]
+
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2")
+
+dt_filtered1_5 <- na.omit(dt_filtered1_5[, ..columns_to_keep, with = FALSE])
+dt_filtered2_5 <- na.omit(dt_filtered2_5[, ..columns_to_keep, with = FALSE])
+#dt_filtered3_5 <- na.omit(dt_filtered3_5[, ..columns_to_keep, with = FALSE])
+
+# Combine data.tables by row
+#combined_dt_5 <- rbindlist(list(dt_filtered1_5, dt_filtered2_5, dt_filtered3_5), fill = TRUE)
+combined_dt_5 <- rbindlist(list(dt_filtered1_5, dt_filtered2_5), fill = TRUE)
+
+filtered_data_5 <- subset(combined_dt_5, padj < 0.05)
+
+# Merge rows based on the Feature_ID column
+newcombined_dt_5 <- combined_dt_5[, lapply(.SD, function(x) if(all(is.na(x))) NA else x), by = Feature_ID]
+
+############################################# T11 ################################################################
+# Filter rows where Collection_date is 0
+dt_filtered1_11 <- DESeq2_results1[Collection_date == 11]
+dt_filtered2_11 <- DESeq2_results2[Collection_date == 11]
+#dt_filtered3_11 <- DESeq2_results3[Collection_date == 11]
+
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2")
+
+dt_filtered1_11 <- na.omit(dt_filtered1_11[, ..columns_to_keep, with = FALSE])
+dt_filtered2_11 <- na.omit(dt_filtered2_11[, ..columns_to_keep, with = FALSE])
+#dt_filtered3_11 <- na.omit(dt_filtered3_11[, ..columns_to_keep, with = FALSE])
+
+# Combine data.tables by row
+#combined_dt_11 <- rbindlist(list(dt_filtered1_11, dt_filtered2_11, dt_filtered3_11), fill = TRUE)
+combined_dt_11 <- rbindlist(list(dt_filtered1_11, dt_filtered2_11), fill = TRUE)
+
+filtered_data_11 <- subset(combined_dt_11, padj < 0.05)
+
+# Merge rows based on the Feature_ID column
+newcombined_dt_11 <- combined_dt_11[, lapply(.SD, function(x) if(all(is.na(x))) NA else x), by = Feature_ID]
+
+############################################# T20 ################################################################
+# Filter rows where Collection_date is 0
+dt_filtered1_20 <- DESeq2_results1[Collection_date == 20]
+dt_filtered2_20 <- DESeq2_results2[Collection_date == 20]
+#dt_filtered3_20 <- DESeq2_results3[Collection_date == 20]
+
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2")
+
+dt_filtered1_20 <- na.omit(dt_filtered1_20[, ..columns_to_keep, with = FALSE])
+dt_filtered2_20 <- na.omit(dt_filtered2_20[, ..columns_to_keep, with = FALSE])
+#dt_filtered3_20 <- na.omit(dt_filtered3_20[, ..columns_to_keep, with = FALSE])
+
+# Combine data.tables by row
+#combined_dt_20 <- rbindlist(list(dt_filtered1_20, dt_filtered2_20, dt_filtered3_20), fill = TRUE)
+combined_dt_20 <- rbindlist(list(dt_filtered1_20, dt_filtered2_20), fill = TRUE)
+
+filtered_data_20 <- subset(combined_dt_20, padj < 0.05)
+
+# Merge rows based on the Feature_ID column
+newcombined_dt_20 <- combined_dt_20[, lapply(.SD, function(x) if(all(is.na(x))) NA else x), by = Feature_ID]
+
+############################################# T35 ################################################################
+# Filter rows where Collection_date is 0
+dt_filtered1_35 <- DESeq2_results1[Collection_date == 35]
+dt_filtered2_35 <- DESeq2_results2[Collection_date == 35]
+#dt_filtered3_35 <- DESeq2_results3[Collection_date == 35]
+
+columns_to_keep <- c("Feature_ID", "log2FoldChange", "Collection_date","padj", "Species_group1", "Species_group2")
+
+dt_filtered1_35 <- na.omit(dt_filtered1_35[, ..columns_to_keep, with = FALSE])
+dt_filtered2_35 <- na.omit(dt_filtered2_35[, ..columns_to_keep, with = FALSE])
+#dt_filtered3_35 <- na.omit(dt_filtered3_35[, ..columns_to_keep, with = FALSE])
+
+# Combine data.tables by row
+#combined_dt_35 <- rbindlist(list(dt_filtered1_35, dt_filtered2_35, dt_filtered3_35), fill = TRUE)
+combined_dt_35 <- rbindlist(list(dt_filtered1_35, dt_filtered2_35), fill = TRUE)
+
+filtered_data_35 <- subset(combined_dt_35, padj < 0.05)
+
+# Merge rows based on the Feature_ID column
+newcombined_dt_35 <- combined_dt_35[, lapply(.SD, function(x) if(all(is.na(x))) NA else x), by = Feature_ID]
+
+```
+
+
+
+# Merge the combined DESeq results with taxonomic information
+
+```{r}
+DESeq2_results_with_taxonomy_0 <- merge(
+  newcombined_dt_0,
+  SE %>% rowData() %>% as.data.table("Feature_ID"))
+DESeq2_results_with_taxonomy_5 <- merge(
+  newcombined_dt_5,
+  SE %>% rowData() %>% as.data.table("Feature_ID"))
+DESeq2_results_with_taxonomy_11 <- merge(
+  newcombined_dt_11,
+  SE %>% rowData() %>% as.data.table("Feature_ID"))
+DESeq2_results_with_taxonomy_20 <- merge(
+  newcombined_dt_20,
+  SE %>% rowData() %>% as.data.table("Feature_ID"))
+DESeq2_results_with_taxonomy_35 <- merge(
+  newcombined_dt_35,
+  SE %>% rowData() %>% as.data.table("Feature_ID"))
+
+# remove NA and uncultured rows
+# Function to remove rows with values between +2 and -2 in the 'value_column'
+remove_outliers <- function(dt, log2FoldChange) {
+  dt <- dt[!(is.na(Family) | Family == "uncultured"| Family == "Unknown Family")]
+  dt <- dt[!(log2FoldChange >= -8 & log2FoldChange <= 8)]
+  return(dt)
+}
+
+# Remove NA and uncultured rows, and outliers for each data.table
+DESeq2_results_with_taxonomy_0 <- remove_outliers(DESeq2_results_with_taxonomy_0, log2FoldChange)
+DESeq2_results_with_taxonomy_5 <- remove_outliers(DESeq2_results_with_taxonomy_5, log2FoldChange)
+DESeq2_results_with_taxonomy_11 <- remove_outliers(DESeq2_results_with_taxonomy_11, log2FoldChange)
+DESeq2_results_with_taxonomy_20 <- remove_outliers(DESeq2_results_with_taxonomy_20, log2FoldChange)
+DESeq2_results_with_taxonomy_35 <- remove_outliers(DESeq2_results_with_taxonomy_35, log2FoldChange)
+
+# Then, replace the empty Genus with "unknown-" followed by the name from Family
+DESeq2_results_with_taxonomy_0[is.na(Genus), Genus := paste0("unknown-", Family)]
+DESeq2_results_with_taxonomy_0[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+DESeq2_results_with_taxonomy_5[is.na(Genus), Genus := paste0("unknown-", Family)]
+DESeq2_results_with_taxonomy_5[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+DESeq2_results_with_taxonomy_11[is.na(Genus), Genus := paste0("unknown-", Family)]
+DESeq2_results_with_taxonomy_11[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+DESeq2_results_with_taxonomy_20[is.na(Genus), Genus := paste0("unknown-", Family)]
+DESeq2_results_with_taxonomy_20[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+DESeq2_results_with_taxonomy_35[is.na(Genus), Genus := paste0("unknown-", Family)]
+DESeq2_results_with_taxonomy_35[Genus == "uncultured", Genus := paste0("uncultured-", Family)]
+
+
+```
+
+
+
+
+# For each file individually:  extract data and prepare matrix for the heatmap
+```{r}
+# Assuming DESeq2_results_with_taxonomy is your data.table
+
+# First, let's pivot the data to have Feature_ID as rows and Collection_date as columns
+gheatmap_data1 <- dcast(DESeq2_results_with_taxonomy_0, Genus + ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+gheatmap_data2 <- dcast(DESeq2_results_with_taxonomy_5, Genus + ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+gheatmap_data3 <- dcast(DESeq2_results_with_taxonomy_11, Genus + ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+gheatmap_data4 <- dcast(DESeq2_results_with_taxonomy_20, Genus + ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+gheatmap_data5 <- dcast(DESeq2_results_with_taxonomy_35, Genus + ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+write_tsv(gheatmap_data1, file.path(DiffAbund_DIR, "ASV_Genus_T0_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(gheatmap_data2, file.path(DiffAbund_DIR, "ASV_Genus_T5_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(gheatmap_data3, file.path(DiffAbund_DIR, "ASV_Genus_T11_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(gheatmap_data4, file.path(DiffAbund_DIR, "ASV_Genus_T20_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(gheatmap_data5, file.path(DiffAbund_DIR, "ASV_Genus_T35_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+
+# First, let's pivot the data to have Feature_ID as rows and Collection_date as columns
+heatmap_data1 <- dcast(DESeq2_results_with_taxonomy_0, ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+heatmap_data2 <- dcast(DESeq2_results_with_taxonomy_5, ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+heatmap_data3 <- dcast(DESeq2_results_with_taxonomy_11, ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+heatmap_data4 <- dcast(DESeq2_results_with_taxonomy_20, ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+heatmap_data5 <- dcast(DESeq2_results_with_taxonomy_35, ASV_ID ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+
+# reorder the columns to have ASV_ID, Genus, E25, and UV7
+gheatmap_data1 <- gheatmap_data1[, c("ASV_ID", "Genus", "E25", "UV7")]
+gheatmap_data2 <- gheatmap_data2[, c("ASV_ID", "Genus", "E25", "UV7")]
+gheatmap_data3 <- gheatmap_data3[, c("ASV_ID", "Genus", "E25", "UV7")]
+gheatmap_data4 <- gheatmap_data4[, c("ASV_ID", "Genus", "E25", "UV7")]
+gheatmap_data5 <- gheatmap_data5[, c("ASV_ID", "Genus", "E25", "UV7")]
+
+# Convert the data.table to a matrix
+heatmap_matrix1 <- as.matrix(gheatmap_data1[, .(E25, UV7)])
+heatmap_matrix2 <- as.matrix(gheatmap_data2[, .(E25, UV7)])
+heatmap_matrix3 <- as.matrix(gheatmap_data3[, .(E25, UV7)])
+heatmap_matrix4 <- as.matrix(gheatmap_data4[, .(E25, UV7)])
+heatmap_matrix5 <- as.matrix(gheatmap_data5[, .(E25, UV7)])
+
+heatmap_matrix1[is.nan(heatmap_matrix1)] <- 0
+heatmap_matrix2[is.nan(heatmap_matrix2)] <- 0
+heatmap_matrix3[is.nan(heatmap_matrix3)] <- 0
+heatmap_matrix4[is.nan(heatmap_matrix4)] <- 0
+heatmap_matrix5[is.nan(heatmap_matrix5)] <- 0
+
+
+# Set row names to ASV_ID
+rownames(heatmap_matrix1) <- gheatmap_data1$ASV_ID
+rownames(heatmap_matrix2) <- gheatmap_data2$ASV_ID
+rownames(heatmap_matrix3) <- gheatmap_data3$ASV_ID
+rownames(heatmap_matrix4) <- gheatmap_data4$ASV_ID
+rownames(heatmap_matrix5) <- gheatmap_data5$ASV_ID
+
+
+# Create annotation for rows (Genus)
+row_annotation1 <- data.frame(Genus = gheatmap_data1$Genus, row.names = gheatmap_data1$ASV_ID)
+row_annotation2 <- data.frame(Genus = gheatmap_data2$Genus, row.names = gheatmap_data2$ASV_ID)
+row_annotation3 <- data.frame(Genus = gheatmap_data3$Genus, row.names = gheatmap_data3$ASV_ID)
+row_annotation4 <- data.frame(Genus = gheatmap_data4$Genus, row.names = gheatmap_data4$ASV_ID)
+row_annotation5 <- data.frame(Genus = gheatmap_data5$Genus, row.names = gheatmap_data5$ASV_ID)
+
+
+
+
+```
+ 
+# Make a count file for how many ASVs can be found at each timepoint per genus
+```{r}
+E1 <- gheatmap_data1[, c("ASV_ID", "Genus", "E25")]
+E2 <- gheatmap_data1[, c("ASV_ID", "Genus", "E25")]
+E3 <- gheatmap_data1[, c("ASV_ID", "Genus", "E25")]
+E4 <- gheatmap_data1[, c("ASV_ID", "Genus", "E25")]
+E5 <- gheatmap_data1[, c("ASV_ID", "Genus", "E25")]
+
+U1 <- gheatmap_data1[, c("ASV_ID", "Genus", "UV7")]
+U2 <- gheatmap_data2[, c("ASV_ID", "Genus", "UV7")]
+U3 <- gheatmap_data3[, c("ASV_ID", "Genus", "UV7")]
+U4 <- gheatmap_data4[, c("ASV_ID", "Genus", "UV7")]
+U5 <- gheatmap_data5[, c("ASV_ID", "Genus", "UV7")]
+ U1 <-  na.omit(U1, cols = "UV7")
+ U2 <-  na.omit(U2, cols = "UV7")
+ U3 <-  na.omit(U3, cols = "UV7")
+ U4 <-  na.omit(U4, cols = "UV7")
+ U5 <-  na.omit(U5, cols = "UV7")
+
+ 
+countsU1 <- U1[, .(count = uniqueN(ASV_ID)), by = Genus]
+countsU2 <- U2[, .(count = uniqueN(ASV_ID)), by = Genus]
+countsU3 <- U3[, .(count = uniqueN(ASV_ID)), by = Genus]
+countsU4 <- U4[, .(count = uniqueN(ASV_ID)), by = Genus]
+countsU5 <- U5[, .(count = uniqueN(ASV_ID)), by = Genus]
+
+# Count the number of unique ASV_IDs for each Genus
+counts1 <- gheatmap_data1[, .(count = uniqueN(ASV_ID)), by = Genus]
+counts2 <- gheatmap_data2[, .(count = uniqueN(ASV_ID)), by = Genus]
+counts3 <- gheatmap_data3[, .(count = uniqueN(ASV_ID)), by = Genus]
+counts4 <- gheatmap_data4[, .(count = uniqueN(ASV_ID)), by = Genus]
+counts5 <- gheatmap_data5[, .(count = uniqueN(ASV_ID)), by = Genus]
+
+write_tsv(counts1, file.path(DiffAbund_DIR, "ASV_Genus_counts_T0_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(counts2, file.path(DiffAbund_DIR, "ASV_Genus_counts_T5_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(counts3, file.path(DiffAbund_DIR, "ASV_Genus_counts_T11_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(counts4, file.path(DiffAbund_DIR, "ASV_Genus_counts_T20_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+write_tsv(counts5, file.path(DiffAbund_DIR, "ASV_Genus_counts_T35_diffAbundabove8_E25_UV7_vs_Ac.tsv"))
+```
+
+# Define colours and breaks
+```{r}
+# Define breaks for the color scale
+breaks <- seq(-25, 25, by = 1)  # Adjust the range and interval as needed
+my_palette <- colorRampPalette(c("navy", "white", "firebrick3"))(49) # 49 number of colour break, important to have an uneven number, so that pure white exists in the middle for "0"s.
+
+# Make colour palette for additional annotation
+# Identify unique values in the 'Genus' column
+unique_genus <- unique(row_annotation4$Genus)
+
+# Define a default color for other characters
+default_color <- "white"
+
+# Create a color vector with specific colors for unique_genus and default_color for others
+my_color <- setNames(rep(default_color, length(unique_genus)), unique_genus)
+
+# Override specific colors for known genera
+#my_color[c("Burkholderia-Caballeronia-Paraburkholderia", "Chthoniobacter", "Edaphobaculum", "Mucilaginibacter", "Reyranella", "Sphingomonas", "uncultured-Micropepsaceae","Candidatus Protochlamydia", "Parachlamydia")] <- c("orange", "yellow2", "#90709a", "chartreuse1", "steelblue1", "brown", "steelblue4", "hotpink","hotpink" )
+
+my_color[c("Acidothermus", "Chthoniobacter", "Dongia", "Mucilaginibacter", "Pseudomonas", "Sphingomonas", "unknown-Caulobacteraceae","Candidatus Protochlamydia", "Parachlamydia")] <- c("orange", "yellow2", "#90709a", "chartreuse1", "steelblue1", "brown", "steelblue4", "hotpink","hotpink" )
+
+
+ann_colors = list(
+    Genus =  my_color)
+
+```
+
+# Heatmap 
+
+```{r}
+# Plot heatmap using pheatmap
+
+# Create heatmaps with consistent color scale
+plot1 <- pheatmap(heatmap_matrix1,
+                  #cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  annotation_row = row_annotation,
+                  annotation_colors = ann_colors,
+                  main = "T0 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  color = my_palette,
+                  border_color= "white",
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Genus_8Diff_ASV-ID_DeSeq_Heatmap_T0_Vs_Ac.png")),
+  plot = plot1,
+  width = 18,
+  height = 17,
+  units = "cm",
+  dpi = 600
+)
+# Create heatmaps with consistent color scale
+plot2 <- pheatmap(heatmap_matrix2,
+                  #cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  annotation_row = row_annotation,
+                  annotation_colors = ann_colors,
+                  main = "T5 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  color = my_palette,
+                  border_color= "white",
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Genus_8Diff_ASV-ID_DeSeq_Heatmap_T5_Vs_Ac.png")),
+  plot = plot2,
+  width = 18,
+  height = 24,
+  units = "cm",
+  dpi = 600
+)
+
+# Create heatmaps with consistent color scale
+plot3 <- pheatmap(heatmap_matrix3,
+                  #cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  annotation_row = row_annotation,
+                  annotation_colors = ann_colors,
+                  main = "T11 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  color = my_palette,
+                  border_color= "white",
+                  breaks = breaks)
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Genus_8Diff_ASV-ID_DeSeq_Heatmap_T11_Vs_Ac.png")),
+  plot = plot3,
+  width = 20,
+  height = 58,
+  units = "cm",
+  dpi = 600
+)
+# Create heatmaps with consistent color scale
+plot4 <- pheatmap(heatmap_matrix4,
+                  #cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  annotation_row = row_annotation4,
+                  annotation_colors = ann_colors,
+                  main = "T20 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  color = my_palette,
+                  border_color= "white",
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_E25spec_ASV-ID_DeSeq_Heatmap_T20_Vs_Ac.png")),
+  plot = plot4,
+  width = 20,
+  height = 25,
+  units = "cm",
+  dpi = 600
+)
+# Create heatmaps with consistent color scale
+plot5 <- pheatmap(heatmap_matrix5,
+                  #cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  annotation_row = row_annotation,
+                  annotation_colors = ann_colors,
+                  main = "T35 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  color = my_palette,
+                  border_color= "white",
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Genus_8Diff_ASV-ID_DeSeq_Heatmap_T35_Vs_Ac.png")),
+  plot = plot5,
+  width = 20,
+  height = 25,
+  units = "cm",
+  dpi = 600
+)
+```
+
+###################################### ###################################### ###################################### 
+###################################### combined treatments + timepooints ########################################################
+
+```{r}
+# Then, replace the empty Genus with "unknown-" followed by the name from Family
+DESeq2_results_with_taxonomy_0[, Species_group1 := paste0(Species_group1, "-0")]
+DESeq2_results_with_taxonomy_0[, Species_group2 := paste0(Species_group2, "-0")]
+
+DESeq2_results_with_taxonomy_5[, Species_group1 := paste0(Species_group1, "-5")]
+DESeq2_results_with_taxonomy_5[, Species_group2 := paste0(Species_group2, "-5")]
+
+DESeq2_results_with_taxonomy_11[, Species_group1 := paste0(Species_group1, "-11")]
+DESeq2_results_with_taxonomy_11[, Species_group2 := paste0(Species_group2, "-11")]
+
+DESeq2_results_with_taxonomy_20[, Species_group1 := paste0(Species_group1, "-20")]
+DESeq2_results_with_taxonomy_20[, Species_group2 := paste0(Species_group2, "-20")]
+
+DESeq2_results_with_taxonomy_35[, Species_group1 := paste0(Species_group1, "-35")]
+DESeq2_results_with_taxonomy_35[, Species_group2 := paste0(Species_group2, "-35")]
+
+# Combine data.tables by row
+combined_dt <- rbindlist(list(DESeq2_results_with_taxonomy_0, DESeq2_results_with_taxonomy_5), fill = TRUE)
+combined_dt <- rbindlist(list(combined_dt, DESeq2_results_with_taxonomy_11), fill = TRUE)
+combined_dt <- rbindlist(list(combined_dt, DESeq2_results_with_taxonomy_20), fill = TRUE)
+combined_dt <- rbindlist(list(combined_dt, DESeq2_results_with_taxonomy_35), fill = TRUE)
+
+
+write_tsv(combined_dt, file.path(DiffAbund_DIR, "Ac_Diffabund_taxa.tsv"))
+
+```
+
+
+
+
+# For each file individually:  extract data and prepare matrix for the heatmap
+```{r}
+# First, let's pivot the data to have Feature_ID as rows and Collection_date as columns
+heatmap_data <- dcast(combined_dt, Genus ~ Species_group2, value.var = "log2FoldChange", fun.aggregate = mean)
+
+
+# Manually reorder the columns based on custom order
+# Extract Feature_ID column for row names
+row_names <- heatmap_data$Genus
+
+# Remove Feature_ID column from data
+heatmap_data <- heatmap_data[, -1, with = FALSE]
+
+# Convert the data.table to a matrix
+heatmap_matrix <- as.matrix(heatmap_data)
+
+heatmap_matrix[is.nan(heatmap_matrix)] <- 0
+
+#custom_order <- c("Ac-0","E25-0","UV7-0","Ac-5","E25-5","UV7-5","Ac-11","E25-11","UV7-11","Ac-20","E25-20","UV7-20","Ac-35","E25-35","UV7-35")
+custom_order <- c("E25-0","UV7-0","E25-5","UV7-5","E25-11","UV7-11","E25-20","UV7-20","E25-35","UV7-35")
+
+# Reorder the columns of heatmap_matrix according to the custom order
+heatmap_matrix <- heatmap_matrix[, match(custom_order, colnames(heatmap_matrix)), drop = FALSE]
+
+```
+
+# Heatmap 
+
+```{r}
+# Plot heatmap using pheatmap
+# Define breaks for the color scale
+breaks <- seq(-25, 25, by = 1)  # Adjust the range and interval as needed
+my_palette <- colorRampPalette(c("navy", "white", "firebrick3"))(49) # 49 number of colour break, important to have an uneven number, so that pure white exists in the middle for "0"s.
+
+# Create heatmaps with consistent color scale
+plot <- pheatmap(heatmap_matrix,
+                  #cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  labels_row = row_names,
+                  main = "vs. SC",
+                  fontsize_row = 4.5,
+                  fontsize_col = 4,
+                  cellwidth = 12,
+                  cellheight = 4.5,
+                  color = my_palette,
+                  border_color= "white",
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_Genus_DeSeq_Heatmap_E25UV7_vs_SC.png")),
+  plot = plot,
+  width = 14,
+  height = 23.5,
+  units = "cm",
+  dpi = 600
+)
+```
+
+
+
+# add abundance data to the DESeq results
+```{r}
+# Extract the relevant columns from SE
+abundance_data <- counts(SE)
+collection_dates <- colData(SE)$collection_date
+feature_ids <- rownames(abundance_data)
+Species <- colData(SE)$Species
+
+# Create a data.table from the extracted columns
+SE_dt <- data.table(
+  Collection_date = rep(collection_dates, each = nrow(abundance_data)),
+  Feature_ID = rep(feature_ids, length(collection_dates)),
+  abundance = as.vector(t(abundance_data)),
+  Species = rep(Species, each = nrow(abundance_data))
+)
+# Define a key for merging
+setkey(SE_dt, Collection_date, Feature_ID, Species)
+
+# Subset SE data.table with only relevant columns
+SE_subset <- SE_dt[, .(Collection_date, Feature_ID, abundance, Species)]
+
+
+merged_results1 <- merge(
+  DESeq2_results_with_taxonomy_0, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+merged_results2 <- merge(
+  DESeq2_results_with_taxonomy_5, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+merged_results3 <- merge(
+  DESeq2_results_with_taxonomy_11, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+merged_results4 <- merge(
+  DESeq2_results_with_taxonomy_20, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+merged_results5 <- merge(
+  DESeq2_results_with_taxonomy_35, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+
+# Print the first few rows of the merged results
+print(head(merged_results1))
+print(head(merged_results2))
+print(head(merged_results3))
+print(head(merged_results4))
+print(head(merged_results5))
+
+
+# Exclude rows with Species name "E25" from merged_results
+merged_results1_filtered1 <- merged_results1[Species != "Ac"]
+merged_results1_filtered2 <- merged_results1[Species != "E25"]
+
+merged_results2_filtered1 <- merged_results2[Species != "Ac"]
+merged_results2_filtered2 <- merged_results2[Species != "UV7"]
+
+merged_results3_filtered1 <- merged_results3[Species != "UV7"]
+merged_results3_filtered2 <- merged_results3[Species != "E25"]
+
+
+# Print the first few rows of the filtered merged results
+print(head(merged_results1_filtered1))
+print(head(merged_results1_filtered2))
+
+```
+
+# Create the barplot for abundance
+```{r}
+
+#barplot_abundance3 <- 
+  
+  ggplot(
+  data = merged_results3[padj <= 0.05],
+  mapping = aes(
+    x = Genus,
+    y = abundance,
+    fill = Genus
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date)+
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  coord_flip() +
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 4),
+   axis.title = element_text(),
+   #axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance E25")
+
+
+# Arrange plots side by side
+combined_plot <- gridExtra::grid.arrange(barplot_abundance1, barplot_abundance2,  ncol = 2, widths = c(1, 1))
+```
+
+
+
+
+###################################### ###################################### ###################################### 
+###################################### reordered highest to lowest ########################################################
+# reorder rows in descending order
+```{r}
+# Calculate row-wise sum or maximum
+row_sums1 <- rowSums(heatmap_matrix1, na.rm = TRUE)  # Sum of values in each row, excluding NA
+row_sums2 <- rowSums(heatmap_matrix2, na.rm = TRUE)  # Sum of values in each row, excluding NA
+row_sums3 <- rowSums(heatmap_matrix3, na.rm = TRUE)  # Sum of values in each row, excluding NA
+row_sums4 <- rowSums(heatmap_matrix4, na.rm = TRUE)  # Sum of values in each row, excluding NA
+row_sums5 <- rowSums(heatmap_matrix5, na.rm = TRUE)  # Sum of values in each row, excluding NA
+
+# If you want to use maximum instead of sum:
+# row_max <- apply(heatmap_matrix1, 1, max)  # Maximum value in each row
+
+# Order rows according to the row-wise sums or maxima
+ordered_rows1 <- order(row_sums1, decreasing = TRUE)  # For sum, use decreasing = TRUE; for max, it's optional
+ordered_rows2 <- order(row_sums2, decreasing = TRUE)  # For sum, use decreasing = TRUE; for max, it's optional
+ordered_rows3 <- order(row_sums3, decreasing = TRUE)  # For sum, use decreasing = TRUE; for max, it's optional
+ordered_rows4 <- order(row_sums4, decreasing = TRUE)  # For sum, use decreasing = TRUE; for max, it's optional
+ordered_rows5 <- order(row_sums5, decreasing = TRUE)  # For sum, use decreasing = TRUE; for max, it's optional
+
+# Reorder heatmap_matrix1 based on the ordered rows
+heatmap_matrix_reordered1 <- heatmap_matrix1[ordered_rows1, ]
+heatmap_matrix_reordered2 <- heatmap_matrix2[ordered_rows2, ]
+heatmap_matrix_reordered3 <- heatmap_matrix3[ordered_rows3, ]
+heatmap_matrix_reordered4 <- heatmap_matrix4[ordered_rows4, ]
+heatmap_matrix_reordered5 <- heatmap_matrix5[ordered_rows5, ]
+
+### Find median for each matrix ###
+# Calculate row sums
+#heat_sums1 <- rowSums(heatmap_matrix_reordered1, na.rm = TRUE)
+
+# Add row sums as a new column to the matrix
+#heatmap_matrix_reordered1_with_sums1 <- cbind(heatmap_matrix_reordered1, RowSums = heat_sums1)
+#heatmap_matrix_reordered1_with_sums2 <- cbind(heatmap_matrix_reordered2, RowSums = heat_sums2)
+#heatmap_matrix_reordered1_with_sums3 <- cbind(heatmap_matrix_reordered3, RowSums = heat_sums3)
+
+# View the matrix with the new column
+#print(heatmap_matrix_reordered1_with_sums1)
+#median(heat_sums1)
+
+#print(heatmap_matrix_reordered1_with_sums2)
+#median(heat_sums2)
+
+#print(heatmap_matrix_reordered1_with_sums3)
+#median(heat_sums3)
+
+
+# Calculate the sum of each individual column
+column_sums1 <- colSums(heatmap_matrix_reordered1, na.rm = TRUE)
+column_sums2 <- colSums(heatmap_matrix_reordered2, na.rm = TRUE)
+column_sums3 <- colSums(heatmap_matrix_reordered3, na.rm = TRUE)
+column_sums4 <- colSums(heatmap_matrix_reordered4, na.rm = TRUE)
+column_sums5 <- colSums(heatmap_matrix_reordered5, na.rm = TRUE)
+
+
+# Print the sum of each individual column
+print(column_sums1)
+print(column_sums2)
+print(column_sums3)
+print(column_sums4)
+print(column_sums5)
+
+```
+
+# Heatmap ordered
+
+```{r}
+# Plot heatmap using pheatmap
+
+breaks <- seq(-20, 20, by = 0.4)  # Adjust the range and interval as needed
+
+
+# Create heatmaps with consistent color scale
+plot1 <- pheatmap(heatmap_matrix_reordered1,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  labels_row = row_names1[ordered_rows1],
+                  main = "T0 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_Heatmap_T0_Vs_Ac.png")),
+  plot = plot1,
+  width = 8.5,
+  height = 11,
+  units = "cm",
+  dpi = 600
+)
+# Create heatmaps with consistent color scale
+plot2 <- pheatmap(heatmap_matrix_reordered2,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  labels_row = row_names2[ordered_rows2],
+                  main = "T5 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_Heatmap_T5_Vs_Ac.png")),
+  plot = plot2,
+  width = 8.5,
+  height = 14,
+  units = "cm",
+  dpi = 600
+)
+
+# Create heatmaps with consistent color scale
+plot3 <- pheatmap(heatmap_matrix_reordered3,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  labels_row = row_names3[ordered_rows3],
+                  main = "T11 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_Heatmap_T11_Vs_Ac.png")),
+  plot = plot3,
+  width = 8.5,
+  height = 16.5,
+  units = "cm",
+  dpi = 600
+)
+# Create heatmaps with consistent color scale
+plot4 <- pheatmap(heatmap_matrix_reordered4,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  labels_row = row_names4[ordered_rows4],
+                  main = "T20 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_Heatmap_T20_Vs_Ac.png")),
+  plot = plot4,
+  width = 8.5,
+  height = 17,
+  units = "cm",
+  dpi = 600
+)
+# Create heatmaps with consistent color scale
+plot5 <- pheatmap(heatmap_matrix_reordered5,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  labels_row = row_names5[ordered_rows5],
+                  main = "T35 (vs. Ac)",
+                  fontsize_row = 7,
+                  fontsize_col = 8,
+                  cellwidth = 20,
+                  cellheight = 7,
+                  breaks = breaks)
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_Heatmap_T35_Vs_Ac.png")),
+  plot = plot5,
+  width = 8.5,
+  height = 18,
+  units = "cm",
+  dpi = 600
+)
+```
+
+
+```{r}
+library(gridExtra)
+
+# Get unique levels of the variable
+variable_levels <- unique(variable)
+
+# Create an empty list to store the heatmaps
+heatmap_list <- list()
+
+# Iterate over each level of the variable
+for (level in variable_levels) {
+  # Filter the data for the current level
+  filtered_data <- heatmap_matrix[variable == level, ]
+  
+  # Create the heatmap for the filtered data
+  heatmap <- pheatmap(filtered_data,
+                      cluster_rows = FALSE,
+                      cluster_cols = FALSE,
+                      labels_row = row_names,
+                      main = paste("Heatmap for", level),
+                      fontsize_row = 7,
+                      fontsize_col = 8,
+                      cellwidth = 20,
+                      cellheight = 7)
+  
+  # Store the heatmap in the list
+  heatmap_list[[level]] <- heatmap
+}
+
+# Plot heatmap using pheatmap
+pheatmap(heatmap_matrix,
+         cluster_rows = TRUE,  # Cluster rows
+         cluster_cols = TRUE,  # Cluster columns
+         clustering_distance_rows = "correlation",
+         labels_row = row_names,  # Set row names
+         main = "combined heatmap",
+         fontsize_row = 7,  # Adjust font size for row labels
+         fontsize_col = 8,  # Adjust font size for column labels
+  #color = viridis::turbo(20),
+  cellwidth = 20,
+  cellheight = 7,
+  #main = g("{PROJECT_NAME}"),
+  # to show the values in the cells:
+  # display_numbers = TRUE,
+  # number_color = "white"
+  # to export the heatmap:
+  #filename = file.path(PLOTS_DIR, g("{PROJECT_NAME}_heatmap_Geli.pdf"))
+)
+
+ggsave(
+  file.path(PLOTS_DIR, g("{PROJECT_NAME}_DeSeq_Heatmap_UV7_E25.png")),
+  plot = plot3,
+  width = 12,
+  height = 27,
+  units = "cm",
+  dpi = 600
+)
+```
+
+```{r}
+SE %>% colData() %>% as_tibble() %>% View()
+```
+# add abundance data to the DESeq results
+```{r}
+# Extract the relevant columns from SE
+abundance_data <- counts(SE)
+collection_dates <- colData(SE)$collection_date
+feature_ids <- rownames(abundance_data)
+Species <- colData(SE)$Species
+
+# Create a data.table from the extracted columns
+SE_dt <- data.table(
+  Collection_date = rep(collection_dates, each = nrow(abundance_data)),
+  Feature_ID = rep(feature_ids, length(collection_dates)),
+  abundance = as.vector(t(abundance_data)),
+  Species = rep(Species, each = nrow(abundance_data))
+)
+# Define a key for merging
+setkey(SE_dt, Collection_date, Feature_ID, Species)
+
+# Subset SE data.table with only relevant columns
+SE_subset <- SE_dt[, .(Collection_date, Feature_ID, abundance, Species)]
+
+
+merged_results1 <- merge(
+  DESeq2_results_with_taxonomy_11, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+merged_results2 <- merge(
+  DESeq2_results_with_taxonomy2, 
+  SE_subset, 
+  by = c("Collection_date", "Feature_ID"), 
+  all = FALSE,  # Keep only matching rows
+  sort = FALSE  # Prevent sorting as we've already set keys
+)
+#merged_results3 <- merge(
+ # DESeq2_results_with_taxonomy3, 
+  #SE_subset, 
+  #by = c("Collection_date", "Feature_ID"), 
+  #all = FALSE,  # Keep only matching rows
+  #sort = FALSE  # Prevent sorting as we've already set keys
+#)
+
+# Print the first few rows of the merged results
+print(head(merged_results1))
+print(head(merged_results2))
+#print(head(merged_results3))
+
+# Exclude rows with Species name "E25" from merged_results
+merged_results1_filtered1 <- merged_results1[Species != "Ac"]
+merged_results1_filtered2 <- merged_results1[Species != "E25"]
+
+merged_results2_filtered1 <- merged_results2[Species != "Ac"]
+merged_results2_filtered2 <- merged_results2[Species != "UV7"]
+
+#merged_results3_filtered1 <- merged_results3[Species != "UV7"]
+#merged_results3_filtered2 <- merged_results3[Species != "E25"]
+
+
+# Print the first few rows of the filtered merged results
+print(head(merged_results1_filtered1))
+print(head(merged_results1_filtered2))
+
+```
+
+# Create the barplot for abundance
+```{r}
+
+barplot_abundance1_1 <- ggplot(
+  data = merged_results1_filtered1[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date)+
+  #scale_y_continuous(limits = NULL, breaks = NULL, labels = rev(levels(merged_results1_filtered1$Family))) + # Reversing the order of y-axis labels
+  coord_flip() +
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 4),
+   axis.title = element_text(),
+   #axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance E25")
+  
+barplot_abundance1_2 <- ggplot(
+  data = merged_results1_filtered2[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 4),
+    #labs(x = "Abundance UV7"),  # Set x-axis label
+    axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance Ac")
+
+barplot_abundance2_1 <- ggplot(
+  data = merged_results2_filtered1[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 4),
+   axis.title = element_text(),
+   axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance UV7")
+  
+barplot_abundance2_2 <- ggplot(
+  data = merged_results2_filtered2[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 4),
+    #labs(x = "Abundance UV7"),  # Set x-axis label
+    axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance Ac")
+
+barplot_abundance3_1 <- ggplot(
+  data = merged_results3_filtered1[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+   axis.text.x = element_text(angle = 90,  hjust = 1, vjust = 0.5, size = 4),
+   axis.title = element_text(),
+   axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance E25")
+  
+barplot_abundance3_2 <- ggplot(
+  data = merged_results3_filtered2[padj <= 0.05],
+  mapping = aes(
+    x = Family,
+    y = abundance,
+    fill = Family
+  )
+) +
+  geom_bar(stat = "identity") +
+  facet_grid(
+    facets = ~Collection_date
+  ) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 4),
+    #labs(x = "Abundance UV7"),  # Set x-axis label
+    axis.text.y = element_blank(), 
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none"
+  )+
+  labs(y="Abundance UV7")
+  
+# Arrange plots side by side
+combined_plot <- gridExtra::grid.arrange(barplot_abundance1_1, barplot_abundance1_2, barplot_abundance2_1, barplot_abundance2_2, barplot_abundance3_1, barplot_abundance3_2,  ncol = 6, widths = c(1, 1, 1, 1, 1, 1))
+```

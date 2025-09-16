@@ -1,0 +1,476 @@
+---
+title: "Beta diversity statistics"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(scater)
+library(tidyr)
+library(dplyr)
+library(gridExtra)
+```
+
+
+# Load data
+
+```{r}
+# loading SE, so that we get all the singletons in the data, not just high abundance taxa as in SE_deep
+SE <- readRDS(file.path(RD_DIR, "SE_abs_all_finalremovedSamples.rds"))
+
+# Subsetting on the fly:
+
+#SEtest <- SE0[, SE0$Species %in% c("UV7","E25")]
+#SEtest <- SE[, SE$Species %in% c("SC","Ac","E25","UV7")]
+SEtest <- SE[, SE$collection_date %in% c("0","5","11","20","35")]
+#SEtest <- SE[, SE$collection_date %in% c("0")]
+
+```
+# Prepare data for analyses
+
+# Identify singletons
+```{r}
+
+# Calculate total count per row
+total_count <- rowSums(counts(SE))
+
+# Identify singletons
+singletons <- which(total_count == 1)
+
+# Subset SE to only include singletons
+SE_singletons <- SE[singletons, ]
+
+# Print number of singletons
+cat("Number of singletons: ", length(singletons), "\n")
+```
+
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+
+# sort the data by hand
+SEtest$Group <- factor(SEtest$Group, levels =c("0-SC", "0-Ac", "0-E25","0-UV7","5-SC", "5-Ac","5-E25","5-UV7","11-SC", "11-Ac","11-E25","11-UV7","20-SC", "20-Ac","20-E25","20-UV7","35-SC", "35-Ac","35-E25","35-UV7"))
+```
+
+
+# Alpha diversity using observed species
+
+## boxplots
+
+# Calculate using shannon
+```{r}
+SEtest <- mia::estimateDiversity(SEtest, 
+                             abund_values = "counts",
+                             index = "shannon", 
+                             name = "shannon")
+head(colData(SEtest)$shannon)
+
+plot1 <- ggplot(data = as.data.frame(colData(SEtest)), aes(x = Group, y = shannon, fill = Species)) +
+  geom_boxplot() +
+  geom_dotplot(binaxis='y', stackdir='center', position=position_dodge(), binwidth = .02)+
+  scale_fill_manual(values = alpha(c("steelblue3","orange2","grey15", "firebrick3"), .7)) +
+  #scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+  facet_grid(. ~ collection_date, scales="free") + 
+    theme_bw() +  
+    theme(axis.text.x = element_blank()) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Diversity[Shannon]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_box-shannon.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+
+# Calculate using chao 
+```{r}
+SEtest <- mia::estimateRichness(SEtest, 
+                             abund_values = "counts",
+                             index = "chao1", 
+                             name = "chao1")
+head(colData(SEtest)$chao1)
+
+plot2 <- ggplot(data = as.data.frame(colData(SEtest)), aes(x = Group, y = chao1, fill = Species)) +
+  geom_boxplot() +
+  geom_dotplot(binaxis='y', stackdir='center', position=position_dodge(), binwidth = 3)+
+  scale_fill_manual(values = alpha(c("steelblue3","orange2","grey15", "firebrick3"), .7)) +
+  scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+  facet_grid(. ~ collection_date, scales="free") + 
+    theme_bw() +  
+    theme(axis.text.x = element_blank()) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Richness[chao1]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_box-chao1.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+
+# Calculate using evenness
+```{r}
+SEtest <- estimateEvenness(SEtest, 
+                       abund_values = "counts", 
+                       index="simpson")
+head(colData(SEtest)$simpson)
+
+SEtest <- addAlpha(SEtest, index = "inverse_simpson", assay.type = "counts")
+
+# Then you can access the result:
+head(colData(SEtest)$inverse_simpson)
+
+plot3 <- ggplot(data = as.data.frame(colData(SEtest)), aes(x = Group, y = inverse_simpson, fill = Species)) +
+  geom_boxplot() +
+  geom_dotplot(binaxis='y', stackdir='center', position=position_dodge(), binwidth = .001)+
+  scale_fill_manual(values = alpha(c("steelblue3","orange2","grey15", "firebrick3"), .7)) +
+  #scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+  facet_grid(. ~ collection_date, scales="free") + 
+    theme_bw() +  
+    theme(axis.text.x = element_blank()) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Diversity[Inv_Simpson]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_box-simpson.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+# Calculate using dominance
+```{r}
+SEtest <- estimateDominance(SEtest, 
+                       abund_values = "counts", 
+                       index="relative")
+
+head(colData(SEtest)$relative)
+
+plot4 <- ggplot(data = as.data.frame(colData(SEtest)), aes(x = Group, y = relative, fill = Species)) +
+  geom_boxplot() +
+  geom_dotplot(binaxis='y', stackdir='center', position=position_dodge(), binwidth = .003)+
+  scale_fill_manual(values = alpha(c("steelblue3","orange2","grey15", "firebrick3"), .7)) +
+  #scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+  facet_grid(. ~ collection_date, scales="free") + 
+    theme_bw() +  
+    theme(axis.text.x = element_blank()) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Richness[relative]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_box-relative.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+# Calculate using observed richness
+```{r}
+SEtest <- mia::estimateRichness(SEtest, 
+                       abund_values = "counts", 
+                       index = "observed", 
+                       name="observed")
+
+plot5 <- ggplot(data = as.data.frame(colData(SEtest)), aes(x = Group, y = observed, fill = Species)) +
+  geom_boxplot() +
+  geom_dotplot(binaxis='y', stackdir='center', position=position_dodge(), binwidth = 3)+
+  scale_fill_manual(values = alpha(c("steelblue3","orange2","grey15", "firebrick3"), .7)) +
+  #scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+  facet_grid(. ~ collection_date, scales="free") + 
+    theme_bw() +  
+    theme(axis.text.x = element_blank()) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Richness[observed]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_box-observed.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+
+# Calculate using phylogenetic diverstiy
+```{r}
+
+SEtest <- mia::estimateDiversity(SEtest, 
+                             abund_values = "counts",
+                             index = "faith", 
+                             name = "faith",
+                             tree_name = "phylo")
+head(colData(SEtest)$faith)
+stat_faith <- aov(faith ~ Species, data = colData(SEtest))
+summary(stat_faith)
+TukeyHSD(stat_faith)
+rstatix::tukey_hsd(stat_faith)
+kruskal.test(faith ~ Species, data = colData(SEtest))
+pairwise.wilcox.test(colData(SEtest)$faith, colData(SEtest)$Species, p.adjust.method = "BH")
+
+plot6 <- ggplot(data = as.data.frame(colData(SEtest)), aes(x = Group, y = faith, fill = Species)) +
+  geom_boxplot() +
+  geom_dotplot(binaxis='y', stackdir='center', position=position_dodge(), binwidth = .1)+
+  scale_fill_manual(values = alpha(c("steelblue3","orange2","grey15", "firebrick3"), .7)) +
+  #scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+  facet_grid(. ~ collection_date, scales="free") + 
+    theme_bw() +  
+    theme(axis.text.x = element_blank()) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Diversity[Faith]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_box-faith.pdf")), width = 10, height = 8, limitsize = FALSE)
+```
+
+## Combine them all in one plot
+```{r}
+grid_plot <- grid.arrange(plot2, plot3, plot6, ncol = 3)
+ggsave(plot=grid_plot, file.path(PLOTS_DIR, g("{PROJECT_NAME}_some_alpha_div_box-all.svg")), width = 20, height = 5, limitsize = FALSE)
+```
+
+
+
+
+
+
+
+#############################################################################################################################
+############################ Statistical analysis in a loop #################################################################
+#############################################################################################################################
+
+# Extract the columns of interest
+```{r}
+stat_table <- as.data.table(colData(SEtest)[, c("inverse_simpson", "Species", "collection_date")])
+
+```
+
+```{r}
+#################### Sort the data by Timepoint#################################
+#input.long <- input.long[order(variable),] # Order input.long by the variable column
+timepoints <- c("0","5","11","20","35") # Define timepoints as a vector of strings
+
+# Define the sample subsets
+sample_subsets <- list(c("SC", "Ac"),c("SC", "E25"),c("SC", "UV7"),c("Ac", "E25"), c("Ac", "UV7"), c("E25", "UV7"))
+
+# Initialize an empty data.table to store the results
+results_time <- data.table(Timepoint = integer(),
+                           Species1 = character(),    # Sample 1 or 2 referr to position 1 or 2 in each item of the sample_subsets list
+                           Species2 = character(),
+                           Anova_pvalue = numeric(),
+                           TukeyHSD_pvalue = numeric())
+
+# Loop over timepoints and sample subsets
+for (i in seq_along(timepoints)) {
+  for (subset in sample_subsets) {
+    # Extract the samples in the subset
+    subset_data <- stat_table[collection_date == timepoints[i] & Species %in% subset]
+    # Check that the subset contains both samples
+    if (length(unique(subset_data$Species)) != 2) next
+    # Perform the ANOVA
+    anova_result <- aov(inverse_simpson ~ Species, data = subset_data)
+    # Perform Tukey's HSD test
+    tukeyhsd_result <- TukeyHSD(anova_result)
+    # Extract the p-value from the ANOVA and TukeyHSD results
+    anova_pvalue <- summary(anova_result)[[1]][["Pr(>F)"]][1]
+    tukeyhsd_pvalue <- tukeyhsd_result[[1]][, "p adj"][1]
+    # Add a row to the results data.table with the summary statistics and significance level
+    if (tukeyhsd_pvalue < 0.0001) {
+      sig <- "****"
+    } else if (tukeyhsd_pvalue < 0.001) {
+      sig <- "***"
+    } else if (tukeyhsd_pvalue < 0.01) {
+      sig <- "**"
+    } else if (tukeyhsd_pvalue < 0.05) {
+      sig <- "*"
+    } else {
+      sig <- "ns"
+    }
+    # Add a row to the results data.table with the summary statistics
+    results_time <- rbind(results_time, data.table(Timepoint = timepoints[i], Species1 = subset[1], Species2 = subset[2], Anova_pvalue = anova_pvalue, TukeyHSD_pvalue = tukeyhsd_pvalue, TukeyHSD_sig = sig), fill = TRUE)
+  }
+}
+
+# Save results as a CSV file
+write.csv(results_time, "Alphadiv_Stats_results_sample_differences.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+## violin plot
+```{r}
+SEtest <- mia::estimateRichness(SEtest, 
+                       abund_values = "counts", 
+                       index = "observed", 
+                       name="observed")
+
+head(colData(SEtest)$observed)
+
+#SEtest <- SEtest$collection_date[ , T0 := as.numeric(T0)] 
+#SEtest <- SEtest$collection_date[ , T5 := as.numeric(T5)]  
+#SEtest <- SEtest$collection_date[ , T11 := as.numeric(T11)]  
+#SEtest <- SEtest$collection_date[ , T20 := as.numeric(T20)]  
+#SEtest <- SEtest$collection_date[ , T35 := as.numeric(T35)]  
+#SEtest <- as.character(SEtest[[collection_date]], "0")  
+SEtest$Group <- factor(SEtest$Group, levels =c("0-SC", "0-Ac", "0-E25","0-UV7","5-SC", "5-Ac","5-E25","5-UV7","11-SC", "11-Ac","11-E25","11-UV7","20-SC", "20-Ac","20-E25","20-UV7","35-SC", "35-Ac","35-E25","35-UV7"))
+#SEtest$Group <- factor(SEtest$Group, levels =c("-13-NS", "-13-SC", "-13-STS", "0-Ac", "0-E25", "0-SC", "0-UV7", "5-Ac", "5-E25", "5-SC", "5-UV7", "11-Ac", "11-E25", "11-SC", "11-UV7", "20-Ac", "20-E25", "20-SC", "20-UV7", "35-Ac", "35-E25", "35-SC", "35-STS", "35-UV7", "neg_extr"))
+
+#levels(SEtest$Group) <- list("0"="0-E25" , "0"="0-UV7","5"="5-E25","5"="5-UV7","11"="11-E25","11"="11-UV7","20"="20-E25","20"="20-UV7","35"="35-E25","35"="35-UV7")
+
+plotColData(SEtest, 
+            "observed", 
+            "Group",
+            "Species",
+            ) +
+    scale_color_manual(values = c("steelblue3","orange2","grey15", "firebrick3"))+
+    theme(axis.text.x = element_text(angle=45,hjust=1)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+  ylab(expression(Richness[Observed]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_all.svg")), width = 10, height = 8, limitsize = FALSE)
+
+```
+ 
+#Subsample plots
+```{r}
+SEtest$Group <- factor(SEtest$Group, levels =c("0-SC", "5-SC","11-SC", "20-SC","35-SC"))
+levels(SEtest$Group) <- list("0"="0-SC" ,"5"="5-SC","11"="11-SC","20"="20-SC","35"="35-SC")
+#SEtest$Group <- factor(SEtest$Group, levels =c("0-Ac", "5-Ac","11-Ac", "20-Ac","35-Ac"))
+#levels(SEtest$Group) <- list("0"="0-Ac" ,"5"="5-Ac","11"="11-Ac","20"="20-Ac","35"="35-Ac")
+#SEtest$Group <- factor(SEtest$Group, levels =c("0-E25", "5-E25","11-E25", "20-E25","35-E25"))
+#levels(SEtest$Group) <- list("0"="0-E25" ,"5"="5-E25","11"="11-E25","20"="20-E25","35"="35-E25")
+#SEtest$Group <- factor(SEtest$Group, levels =c("0-UV7", "5-UV7","11-UV7", "20-UV7","35-UV7"))
+#levels(SEtest$Group) <- list("0"="0-UV7" ,"5"="5-UV7","11"="11-UV7","20"="20-UV7","35"="35-UV7")
+
+plotColData(SEtest, 
+            "observed", 
+            "Group",
+            "Species",
+            ) +
+    #scale_color_manual(values = c("steelblue3","orange2","grey15", "firebrick3"))+
+    geom_boxplot(alpha=0.6)+ 
+    scale_color_manual(values = c("steelblue3","orange2","grey15", "firebrick3"))+
+    scale_y_continuous(breaks =c(100,200, 300, 400,500, 600))+
+    theme(axis.text.x = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(axis.text.y = element_text(angle=0,hjust=0.5, size =12)) + 
+    theme(legend.title = element_blank())+ ### to remove only the Legend title
+    theme(axis.title.x  = element_blank()) +
+    theme(axis.title.y  = element_text(angle=90, vjust=2.2, size=20)) +
+    theme(legend.text = element_text(size=15))+
+    theme(legend.key.size = unit(1.0, 'cm'))+
+  ylab(expression(Richness[Observed]))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_alpha_div_SC.pdf")), width = 10, height = 8, limitsize = FALSE)
+
+```
+
+# Visualize multiple alpha diversity measures
+
+```{r}
+plots <- lapply(c("observed", "shannon", "relative","simpson","chao1", "inverse_simpson"),
+                plotColData,
+                object = SEtest,
+                x = "collection_date",
+               colour_by = "Species")# c("steelblue3","orange2","grey15", "firebrick3"))
+plots <- lapply(plots,"+", theme(axis.text.x = element_text(angle=45,hjust=1)))
+ggpubr::ggarrange(plotlist = plots, nrow = 2, ncol = 3, common.legend = TRUE, legend = "right")
+```
+
+
+# All plots together as boxplots
+```{r}
+SEtest$Group <- factor(SEtest$Group, levels =c("0-SC", "0-Ac", "0-E25","0-UV7","5-SC", "5-Ac","5-E25","5-UV7","11-SC", "11-Ac","11-E25","11-UV7","20-SC", "20-Ac","20-E25","20-UV7","35-SC", "35-Ac","35-E25","35-UV7"))
+
+# Calculate using shannon
+SEtest <- mia::estimateDiversity(SEtest, 
+                                 abund_values = "counts",
+                                 index = "shannon", 
+                                 name = "shannon")
+head(colData(SEtest)$shannon)
+
+# Calculate using phylogenetic diversity
+SEtest <- mia::estimateRichness(SEtest, 
+                                abund_values = "counts",
+                                index = "chao1", 
+                                name = "chao1")
+head(colData(SEtest)$chao1)
+
+# Calculate using evenness
+SEtest <- estimateEvenness(SEtest, 
+                           abund_values = "counts", 
+                           index = "simpson")
+head(colData(SEtest)$simpson)
+
+# Calculate using dominance
+SEtest <- estimateDominance(SEtest, 
+                            abund_values = "counts", 
+                            index = "relative")
+head(colData(SEtest)$relative)
+
+# Calculate using observed richness
+SEtest <- mia::estimateRichness(SEtest, 
+                                abund_values = "counts", 
+                                index = "observed", 
+                                name = "observed")
+head(colData(SEtest)$observed)
+
+# Gather alpha diversity measures into a single data frame
+alpha_diversity <- as.data.frame(colData(SEtest)) %>%
+  select(Group, Species, observed, shannon, chao1, simpson, relative) %>%
+  gather(alpha_measure, value, -Group, -Species)
+# reshape data
+alpha_data <- as.data.frame(colData(SEtest)) %>%
+  select(Group, Species, observed, shannon, relative, simpson) %>%
+  pivot_longer(cols = c(observed, shannon, relative, simpson), 
+               names_to = "alpha_measure", 
+               values_to = "value")
+
+# Gather data for boxplot
+alpha_diversity <- gather(data = SEtest, alpha_measure, value, observed:chao1)
+
+# Create boxplots
+ggplot(alpha_diversity, aes(x = Group, y = value, fill = alpha_measure)) +
+  geom_boxplot() +
+  facet_wrap(~Species, ncol = 2) +
+  xlab("Group") +
+  ylab("Alpha diversity") +
+  theme(axis.text.x = element_text(angle=45,hjust=1))
+```
+
+
+# PERMANOVA
+
+```{r}
+# create example data frame
+df <- data.frame(x = 1:5, y = c("A", "B", "C", "D", "E"), z = 6:10)
+
+# select columns "x" and "y" from data frame
+df_subset <- select(df, x, y)
+
+# print result
+print(df_subset)
+```
+

@@ -1,0 +1,168 @@
+---
+title: "Beta diversity statistics"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output: 
+  html_document:
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+```
+
+
+# Load data
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_deep.rds"))
+
+# Subsetting on the fly:
+#SE0 <- SE[, SE$collection_date %in% c("0")]
+#SE5 <- SE[, SE$collection_date %in% c("5")]
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+#SE20 <- SE[, SE$collection_date %in% c("20")]
+#SE35 <- SE[, SE$collection_date %in% c("35")]
+#SE520 <- SE[, SE$collection_date %in% c("5", "20")]
+#SEf5 <- SE[, SE$collection_date %in% c("5","11", "20","35")]
+#SEf11 <- SE[, SE$collection_date %in% c("11", "20","35")]
+#SEtest <- SE0[, SE0$Species %in% c("UV7","E25")]
+#SEtest <- SE[, SE$Species %in% c("SC","Ac","UV7","E25")]
+SEtest <- SE[, SE$collection_date %in% c("11")]
+
+
+```
+# Prepare data for analyses
+
+Prepare the tree. A rooted phylogenetic tree is required by GUniFrac.
+To inspect the metadata using the RStudio UI, we can use such commands:
+
+```{r}
+SEtest %>% colData() %>% as_tibble() %>% View()
+```
+
+
+Export count matrix:
+
+```{r}
+rarefied_count_matrix <-
+  SEtest %>%
+  assay("rarefied") %>%
+  t() # vegan-style matrix needed
+
+# trim ASVs with no counts
+rarefied_count_matrix <- rarefied_count_matrix[, colSums(rarefied_count_matrix) != 0]
+
+str(rarefied_count_matrix)
+
+# should all be the same
+rowSums(rarefied_count_matrix)
+```
+
+```{r}
+clr_matrix <-
+  SEtest %>%
+  assay("clr") %>%
+  t() # vegan-style matrix needed
+```
+
+
+# Calculate distances
+
+```{r}
+bray_distance <-
+  rarefied_count_matrix %>%
+  vegan::vegdist(method = "bray") %>%
+  as.matrix()
+
+aitchison_distance <-
+  clr_matrix %>%
+  vegan::vegdist(method = "euclidean") %>%
+  as.matrix()
+
+distances <- abind::abind(
+  bray_distance,
+  aitchison_distance,
+  along = 3
+)
+
+# update dinnames:
+dn <- dimnames(distances)
+dn[[3]] <- c(
+  "bray-curtis",
+  "Aitchison"
+)
+dimnames(distances) <- dn
+
+# D2K conversion for MiRKAT:
+kernels <- list(
+  #Unweighted_UniFrac = MiRKAT::D2K(distances[, , "Unweighted_UniFrac"]),
+  Weighted_UniFrac = MiRKAT::D2K(distances[, , "Weighted_UniFrac"]),
+  #Generalized_UniFrac = MiRKAT::D2K(distances[, , "Generalized_UniFrac"]),
+  #Jaccard = MiRKAT::D2K(distances[, , "Jaccard"]),
+  #Bray_Curtis = MiRKAT::D2K(distances[, , "Bray_Curtis"]),
+  #Aitchison = MiRKAT::D2K(distances[, , "Aitchison"])
+)
+```
+
+
+# Quick and dirty PCoA
+
+```{r}
+groups <- as.factor(SEtest$Species)
+stopifnot(is.factor(groups))
+
+#cairo_pdf(file.path(PLOTS_DIR, g("{PROJECT_NAME}_PCoAs.pdf")), width = 9, height = 6)
+#par(mfrow = c(2, 3))
+for (dn in dimnames(distances)[[3]]) {
+  dfxy <- cmdscale(distances[, , dn])
+  ade4::s.class(
+    dfxy = dfxy,
+    fac = groups,
+    col = viridis::viridis(nlevels(groups)),
+    sub = dn
+  )
+}
+#dev.off()
+```
+
+
+# PERMANOVA
+
+```{r}
+# the normal way to run an ANOVA
+vegan::adonis(distances[, , 1] ~ Species, data = colData(SEtest))
+
+# multi-distance ANOVA
+GUniFrac::PermanovaG(distances ~ SEtest$Species)$p.tab
+GUniFrac::PermanovaG(distances ~ SEtest$Group)$p.tab
+```
+
+
+# MiRKAT
+
+* Paper: https://doi.org/10.1093/bioinformatics/btaa951
+* Tutorial: https://cran.r-project.org/web/packages/MiRKAT/vignettes/MiRKAT_Vignette.html
+
+```{r}
+# groups need to be dichotomous (only two groups) and converted to 0s and 1s
+#SE11 <- SE[, SE$collection_date %in% c("11")]
+
+#SEtest <- SE11[, SE11$Species %in% c("UV7","SC","Ac","E25")]
+test_groups_binary <- as.numeric(SEtest$collection_date %in% c("11"))
+
+test_groups_binary
+```
+
+```{r}
+MiRKAT::MiRKAT(
+  y = test_groups_binary,
+  Ks = kernels,
+  out_type = "D",
+  method = "permutation"
+)
+```

@@ -1,0 +1,105 @@
+##### DESEQ2
+---
+title: "DESeq2"
+author: "David Seki"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+library(ampvis2)
+library(data.table)
+library(tidyverse)
+library(viridis)
+library(ggpubr)
+library(DESeq2)
+library(phyloseq)
+library(ggrepel) 
+```
+
+
+# Load data
+```{r}
+PS <- readRDS(file.path(RD_DIR, "PS_abs.rds")) #%>%
+  #altExp("top")
+```
+
+
+```{r}
+physeq1 <- phyloseq(OTU, TAX, samples)
+otu_table(PS) <- otu_table(round(as((otu_table(PS)), "matrix")), taxa_are_rows(PS))
+ps <-tax_glom(PS, "Genus" )
+
+saliva_physeq = subset_samples(ps, Compartment %in% c("Saliva"))
+feces_physeq = subset_samples(ps, Compartment %in% c("Feces"))
+rumen_physeq = subset_samples(ps, Compartment %in% c("Rumen"))
+
+amp_raw$metadata$Community
+###saliva deseq
+saliva_dds = phyloseq_to_deseq2(saliva_physeq, ~ Community+Cow+Time)
+saliva_dds$Community<-relevel(saliva_dds$Community, ref=("Total"))
+###enrichment from reference = baseline, means positive logfoldchange from Total into MACS
+levels(saliva_dds$Community)
+saliva_dds_model = DESeq(saliva_dds, test="Wald", fitType="parametric")
+
+res_saliva = results(saliva_dds_model, cooksCutoff = FALSE)
+alpha = 1
+sigtab = res_saliva[which(res_saliva$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(ps)[rownames(sigtab), ], "matrix"))
+sigtab <- tibble::rownames_to_column(sigtab, "ASV")
+sigtab %>% print()
+
+# Phylum order
+x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+
+# Family order
+x = tapply(sigtab$log2FoldChange, sigtab$Family, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Family = factor(as.character(sigtab$Family), levels=names(x))
+n = nrow(sigtab)
+sigtab<-as.data.table(sigtab)
+ggplot(sigtab[Phylum != ""],
+       aes(x=Family,
+           y=log2FoldChange,
+           color=Phylum)
+) +  geom_point(size=4
+) + theme_bw(
+) + theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)
+)
+sigtab<-as.data.table(sigtab)
+saliva_deseq_volcano<-ggplot(sigtab[],
+                             aes(
+                               y=-log10(pvalue),
+                               x=log2FoldChange,
+                               colour = c(padj <= 5.141102e-10),
+                               alpha = 0.6,
+                               label = ASV
+                             )
+                             
+) + geom_jitter(
+) + geom_label_repel(data = sigtab[padj <= 5.141102e-10], max.overlaps = Inf
+) + theme_classic(
+) + ggtitle("") +
+  xlab("log2FoldChange") + ylab("-log10(pvalue)"
+  ) + theme(legend.position='bottom'
+            #) + scale_color_viridis(
+  )+ geom_vline(xintercept=c(-10, 10), col="black"
+  )+ geom_hline(yintercept=-log10(0.05), col="black"
+  ) + scale_colour_manual(values = c("black","#0072B2")
+  )
+saliva_deseq_volcano 
+
+```

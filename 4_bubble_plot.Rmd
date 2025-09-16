@@ -1,0 +1,124 @@
+---
+title: "Bubble plot"
+author: "Bela Hausmann (Joint Microbiome Facility)"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# remove all the objects from the R session
+```{r}
+rm(list=ls())#read input file, containing culture data
+```
+
+```{r}
+source("0_common.R", chdir = TRUE)
+library(mia)
+```
+
+
+# Load container
+
+```{r}
+SE <- readRDS(file.path(RD_DIR, "SE_deep_all_finalremovedSamples.rds"))
+SE <- transformCounts(SE, method = "relabundance")
+SEtest <- SE[, SE$collection_date %in% c("0")]
+```
+
+```{r}
+#SEtest %>% colData() %>% as_tibble() %>% View()
+```
+# Prepare data
+
+```{r}
+Data <-
+  SEtest %>%
+  meltAssay(assay_name = "relabundance", add_row_data = TRUE, add_col_data = TRUE) %>%
+  tidyr::unite("Lineage", Domain:ASV_ID, sep = " > ", remove = FALSE) %>%
+  as.data.table()
+
+Data <- Data[relabundance > 0] # zeros are optional in bubble plots
+```
+
+```{r}
+Data <- Data[, relabundance := relabundance * 100] # convert to %
+```
+
+```{r}
+Data[, Lineage := Lineage %>% str_replace("( (NA|uncultured) >)+", " … >")]
+```
+
+
+
+# Select taxa for plot
+
+```{r}
+selected_taxa <- getTopTaxa(SE, top = 20, method = "median", abund_values = "relabundance")
+```
+
+```{r}
+# selected_taxa could also be chosen by other criteria, e.g., significantly differential abundant ASVs:
+# selected_taxa <- fread(file.path(RESULTS_DIR, g("DESeq2_results.tsv")))[padj <= 0.05, Feature_ID]
+```
+
+
+# Plot taxa
+
+```{r}
+plot_data <- Data[FeatureID %in% selected_taxa]
+plot_data$Lineage %>%
+  unique() %>%
+  sort() %>%
+  cat(sep = "\n")
+```
+
+```{r}
+ggplot(
+  data = plot_data,
+  mapping = aes(
+    x = JMF_sample_ID,
+    y = Lineage %>% fct_rev(),
+    size = relabundance,
+    fill = Family
+  )
+) +
+  geom_point(
+    shape = 21,
+    colour = "black"
+  ) +
+  geom_text(
+    data = plot_data[relabundance >= 1],
+    mapping = aes(label = round(relabundance)),
+    size = 1,
+    hjust = 0.35,
+    vjust = 0.6,
+  ) +
+  scale_size_area(
+    max_size = 10,
+    breaks = 10^(-9:2),
+    labels = formatC
+  ) +
+  facet_grid(
+    facets = ~ Species + collection_date,
+    scale = "free_x",
+    space = "free_x"
+  ) +
+  labs(
+    x = NULL,
+    y = NULL,
+    size = "RA (%)"
+  ) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme(axis.text.x = element_text(
+    angle = 90,
+    hjust = 1,
+    vjust = 0.5
+  ))
+
+ggsave(file.path(PLOTS_DIR, g("{PROJECT_NAME}_taxa_bubble_plot.pdf")), device = cairo_pdf, width = 26, height = 8, limitsize = FALSE)
+```
